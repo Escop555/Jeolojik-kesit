@@ -113,6 +113,29 @@
   button.tool{font-weight:600}
   button.tool.on{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 1px 4px rgba(31,122,77,.35)}
   #wrap{flex:1;overflow:auto;padding:18px}
+  header button.lib{background:linear-gradient(180deg,#f0b24a,#d88f1c);border-color:#e9a43a;color:#1b1b1b;font-weight:700}
+  header button.lib:hover{filter:brightness(1.06);background:linear-gradient(180deg,#f0b24a,#d88f1c)}
+  #docName{font-size:12px;color:#334155;margin-right:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px}
+  #docName .dirty{color:#c2410c;font-weight:600}
+  #modal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);backdrop-filter:blur(2px)}
+  #modal.on{display:flex}
+  .mbox{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(15,23,42,.35);padding:18px 20px;width:min(560px,94vw);max-height:88vh;overflow:auto;animation:fadeUp .22s var(--ease)}
+  .mbox.lg{width:min(980px,96vw)}
+  .mbox .mh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .mbox .mh b{font-size:16px}
+  .mbtns{display:flex;gap:8px;margin-top:16px;align-items:center}
+  .msave{display:flex;gap:8px;align-items:flex-end;padding:12px;background:#f4f7fa;border:1px solid var(--line);border-radius:10px}
+  .mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+  .kcard{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;transition:box-shadow .2s,border-color .2s,transform .15s}
+  .kcard:hover{box-shadow:0 6px 18px rgba(15,23,42,.12);border-color:var(--line2);transform:translateY(-1px)}
+  .kcard.cur{border-color:var(--accent);box-shadow:0 0 0 2px #bfe0cc}
+  .kth{height:120px;background:#f1f5f9;cursor:pointer;display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--line)}
+  .kth img{max-width:100%;max-height:100%;display:block}
+  .kin{padding:9px 11px}
+  .kin b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kin small{color:var(--muted)}
+  .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;z-index:80;box-shadow:0 8px 24px rgba(0,0,0,.25);animation:fadeUp .25s var(--ease);transition:opacity .4s}
+  .toast.out{opacity:0}
   header button.b3d{background:linear-gradient(180deg,#4b6cb7,#34508f);border-color:#5878c2;color:#fff;font-weight:600}
   #v3d{position:fixed;inset:0;z-index:50;display:none;flex-direction:column;background:#e9eef3;animation:fadeUp .25s var(--ease)}
   #v3d.on{display:flex}
@@ -145,12 +168,13 @@
     </div>
     <div class="app">Jeolojik Kesit Oluşturucu</div>
   </div>
-  <button data-action="new">Yeni kesit</button>
+  <button data-action="new" title="Yeni boş kesit sayfası aç">📄 Boş sayfa aç</button>
   <button data-action="sample">Örnek kesit</button>
   <button data-action="open">Aç (.json)</button>
   <button data-action="save">Kaydet (.json)</button>
   <button class="b3d" data-action="open3d">🧊 3D Görünüm</button>
   <span class="sp"></span>
+  <button class="lib" data-action="library" title="Kesiti kaydet, kayıtlı kesitleri gör (Ctrl+S: hızlı kaydet)">💾 Kesitlerim</button>
   <button class="pri" data-action="png">PNG indir</button>
   <input type="file" id="file" accept=".json,application/json" hidden>
   <input type="file" id="upl" accept="image/*" hidden>
@@ -172,11 +196,15 @@
       <button class="sm" data-action="zoom" data-z="1">+</button>
       <button class="sm" data-action="zoom" data-z="0">Sığdır</button>
       <span class="sp"></span>
+      <span id="docName"></span>
       <span id="info"></span>
     </div>
     <div id="wrap"><canvas id="cv"></canvas></div>
   </main>
 </div>
+
+<!-- Genel pencere (Kesitlerim, kaydetme sorusu) -->
+<div id="modal"><div class="mbox"></div></div>
 
 <!-- 3D Görünüm penceresi -->
 <div id="v3d">
@@ -560,7 +588,10 @@ function load(){
   return sampleState();
 }
 let saveT;
-function save(){
+// clean=true: değişiklik sayılmaz (kayıt açma/yeni sayfa gibi durumlar)
+function save(clean = false){
+  if (!clean) state._dirty = true;
+  updateDocName();
   clearTimeout(saveT);
   saveT = setTimeout(() => {
     try { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
@@ -1505,6 +1536,9 @@ cv.addEventListener('dblclick', e => {
   ui.hover = null; save(); scheduleDraw(); schedulePanel();
 });
 document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){ e.preventDefault(); quickSave(); return; }
+  if (e.key === 'Escape' && document.getElementById('modal').classList.contains('on')){ closeModal('cancel'); return; }
+  if (e.key === 'Enter' && document.activeElement?.id === 'askName'){ document.querySelector('[data-action="ask"][data-v="save"]')?.click(); return; }
   if (e.key === 'Escape' && document.getElementById('v3d').classList.contains('on')){ close3D(); return; }
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return;
   if (e.key === 'Escape'){ ui.penPath = null; if (ui.tool === 'pen') setTool('edit'); else selectBody(null); }
@@ -1919,10 +1953,16 @@ document.addEventListener('click', e => {
       state.formations.splice(i, 1); break;
     }
     case 'upload': uploadIdx = i; document.getElementById('upl').click(); return;
-    case 'new': if (!confirm('Yeni boş kesit başlatılsın mı? Formasyon kütüphanesi korunur.')) return;
-      { const lib = state.formations, cp = state.customPatterns; state = blankState(lib); state.customPatterns = cp; } break;
-    case 'sample': if (!confirm('Örnek kesit yüklensin mi? Mevcut kesit değiştirilecek.')) return;
-      { const lib = state.formations, cp = state.customPatterns; state = normalize({...sampleState(), formations:lib, customPatterns:cp}); } break;
+    case 'new': newBlankPage(); return;
+    case 'library': openLibrary(); return;
+    case 'modalClose': closeModal(); return;
+    case 'ask': ui.askName = document.getElementById('askName')?.value; closeModal(t.dataset.v); return;
+    case 'libSave': case 'libSaveNew': case 'libNew': case 'libOpen': case 'libRename': case 'libDup': case 'libDel':
+      libAction(a, t); return;
+    case 'sample': (async () => {
+      if (!(await guardUnsaved('Örnek kesiti açmadan'))) return;
+      const s = sampleState(); delete s.formations; loadSection(s, null); state._dirty = true; save(true); toast('Örnek kesit açıldı');
+    })(); return;
     case 'open': document.getElementById('file').click(); return;
     case 'save': download(new Blob([JSON.stringify(state)], {type:'application/json'}), fileBase() + '.json'); return;
     case 'png': exportPNG(); return;
@@ -1938,10 +1978,20 @@ document.addEventListener('click', e => {
 });
 
 document.getElementById('file').addEventListener('change', async e => {
-  const f = e.target.files[0]; if (!f) return;
-  try { state = normalize(JSON.parse(await f.text())); imgCache.clear(); swatchCache.clear(); save(); renderPanel(); scheduleDraw(); }
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (!(await guardUnsaved('Dosyadaki kesiti açmadan'))) return;
+    // Dosyadaki kütüphane mevcut kütüphaneyle birleştirilir
+    const have = new Set(state.formations.map(x => x.id));
+    const lib = [...state.formations, ...(data.formations || []).filter(x => !have.has(x.id))];
+    const cp = {...(data.customPatterns || {}), ...state.customPatterns};
+    delete data._lib; delete data._dirty;
+    loadSection({...data, usedFormations:lib}, null);
+    state.customPatterns = {...state.customPatterns, ...cp};
+    state._dirty = true; save(true); toast('Dosya açıldı. Kesitlerim’e kaydetmeyi unutma.');
+  }
   catch(err){ alert('Dosya okunamadı: ' + err.message); }
-  e.target.value = '';
 });
 document.getElementById('upl').addEventListener('change', e => {
   const file = e.target.files[0]; e.target.value = ''; if (!file || uploadIdx < 0) return;
@@ -1969,6 +2019,186 @@ function exportPNG(){
   if (!r){ alert('Önce topoğrafya noktalarını girin.'); return; }
   const name = (state.project.subtitle || r.m.bhs.map(b => b.name).join(' ') || 'kesit').replace(/[\\/:*?"<>|']/g, '').trim();
   c.toBlob(b => download(b, 'Jeolojik Kesit ' + name + '.png'), 'image/png');
+}
+
+/* =========================================================
+   KESİTLERİM — tarayıcı hafızasında (IndexedDB) kayıtlı kesitler
+   ========================================================= */
+const KDB = (() => {
+  let p;
+  const open = () => p || (p = new Promise((res, rej) => {
+    const r = indexedDB.open('jeokesit', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kesitler', {keyPath:'id'});
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const run = async (mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('kesitler', mode), req = fn(t.objectStore('kesitler'));
+      t.oncomplete = () => res(req.result); t.onerror = () => rej(t.error);
+    });
+  };
+  return {all:() => run('readonly', s => s.getAll()), get:id => run('readonly', s => s.get(id)),
+          put:rec => run('readwrite', s => s.put(rec)), del:id => run('readwrite', s => s.delete(id))};
+})();
+
+function defaultDocName(){
+  const P = state.project, bh = (state.boreholes || []).map(b => b.name).filter(Boolean).join(' – ');
+  return (P.subtitle || bh || P.title || 'Adsız kesit').trim();
+}
+function updateDocName(){
+  const el = document.getElementById('docName'); if (!el) return;
+  const name = state._lib ? state._lib.name : 'Kaydedilmemiş kesit';
+  el.innerHTML = `📁 <b>${esc(name)}</b>${state._dirty ? ' <span class="dirty">• kaydedilmemiş değişiklik</span>' : ''}`;
+}
+function toast(msg){
+  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.classList.add('out'), 2200); setTimeout(() => t.remove(), 2700);
+}
+// Kesitin kendi verisi (kütüphane hariç) + kullandığı formasyonlar
+function sectionData(){
+  const {formations, customPatterns, _lib, _dirty, ...rest} = state;
+  const used = new Set([state.bg, ...state.bodies.map(b => b.fid)]);
+  const usedF = formations.filter(f => used.has(f.id));
+  const usedP = {};
+  usedF.forEach(f => { if ((f.pattern || '').startsWith('u:') && customPatterns[f.pattern.slice(2)]) usedP[f.pattern.slice(2)] = customPatterns[f.pattern.slice(2)]; });
+  return JSON.parse(JSON.stringify({...rest, usedFormations:usedF, usedPatterns:usedP}));
+}
+function makeThumb(){
+  try { const c = document.createElement('canvas'); draw(c, 0.22, false); return c.toDataURL('image/jpeg', 0.75); }
+  catch(e){ return ''; }
+}
+async function saveToLibrary(name, asNew = false){
+  const id = (!asNew && state._lib && state._lib.id) || 'k' + Date.now().toString(36) + uid();
+  const old = !asNew && state._lib ? await KDB.get(id) : null;
+  const rec = {id, name:(name || defaultDocName()).trim(), createdAt:old ? old.createdAt : Date.now(), savedAt:Date.now(), thumb:makeThumb(), data:sectionData()};
+  await KDB.put(rec);
+  state._lib = {id, name:rec.name}; state._dirty = false; save(true);
+  toast(`“${rec.name}” kaydedildi`);
+  return rec;
+}
+function loadSection(data, lib){
+  const formations = state.formations.slice(), have = new Set(formations.map(f => f.id));
+  (data.usedFormations || []).forEach(f => { if (!have.has(f.id)) formations.push(f); });
+  const customPatterns = {...(data.usedPatterns || {}), ...state.customPatterns};
+  const {usedFormations, usedPatterns, ...rest} = data;
+  state = normalize({...rest, formations, customPatterns});
+  state._lib = lib || null; state._dirty = false;
+  ui.selBody = null; ui.drag = null; ui.penPath = null; ui.flatElev = null;
+  imgCache.clear(); swatchCache.clear();
+  save(true); renderPanel(); scheduleDraw();
+}
+function blankSection(){
+  const lib = state.formations, cp = state.customPatterns;
+  state = blankState(lib); state.customPatterns = cp; state._lib = null; state._dirty = false;
+  ui.selBody = null; ui.flatElev = null; ui.tab = 'kesit';
+  save(true); renderPanel(); scheduleDraw();
+}
+
+/* ---- Pencereler ---- */
+let modalResolve = null;
+function showModal(html, cls = ''){
+  const m = document.getElementById('modal');
+  m.querySelector('.mbox').className = 'mbox ' + cls;
+  m.querySelector('.mbox').innerHTML = html; m.classList.add('on');
+}
+function closeModal(v){ document.getElementById('modal').classList.remove('on'); if (modalResolve){ const r = modalResolve; modalResolve = null; r(v); } }
+
+// Kaydedilmemiş değişiklik varsa sorar. true: devam edilebilir
+async function guardUnsaved(actionText){
+  if (!state._dirty) return true;
+  const linked = !!state._lib;
+  const v = await new Promise(res => {
+    modalResolve = res;
+    showModal(`<div class="mh"><b>Mevcut kesit kaydedilsin mi?</b></div>
+      <p class="hint" style="margin:4px 0 12px">${esc(actionText)} önce, üzerinde çalıştığın kesitteki değişiklikleri kaydetmek ister misin?
+      ${linked ? `Kaydedersen <b>“${esc(state._lib.name)}”</b> güncellenir.` : 'Kesit “Kesitlerim” listesine eklenir.'}</p>
+      <label>Kesit adı<input id="askName" value="${esc(linked ? state._lib.name : defaultDocName())}"></label>
+      <div class="mbtns">
+        <button class="add" data-action="ask" data-v="save">💾 Kaydet ve devam et</button>
+        <button data-action="ask" data-v="nosave">Kaydetmeden devam et</button>
+        <span class="sp"></span>
+        <button data-action="ask" data-v="cancel">Vazgeç</button>
+      </div>`, 'sm');
+    setTimeout(() => document.getElementById('askName')?.select(), 50);
+  });
+  if (v === 'cancel' || v === undefined) return false;
+  if (v === 'save') await saveToLibrary(ui.askName);
+  return true;
+}
+async function newBlankPage(){
+  if (!(await guardUnsaved('Yeni boş sayfa açmadan'))) return;
+  closeModal(); blankSection(); toast('Yeni boş kesit açıldı');
+}
+async function openLibrary(){
+  const recs = (await KDB.all()).sort((a, b) => b.savedAt - a.savedAt);
+  const linked = state._lib;
+  const fmt = t => new Date(t).toLocaleString('tr-TR', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+  showModal(`<div class="mh"><b>💾 Kesitlerim</b><span class="sp"></span><button class="sm" data-action="modalClose">✕</button></div>
+    <div class="msave">
+      <label style="flex:1">Mevcut kesit<input id="libName" value="${esc(linked ? linked.name : defaultDocName())}"></label>
+      <button class="add" data-action="libSave">${linked ? '💾 Kaydet (güncelle)' : '💾 Kaydet'}</button>
+      ${linked ? '<button data-action="libSaveNew">Yeni kesit olarak kaydet</button>' : ''}
+    </div>
+    <div class="row" style="margin:14px 0 10px">
+      <input id="libSearch" placeholder="Kayıtlı kesitlerde ara…" style="flex:1">
+      <button class="tool on" data-action="libNew">＋ Yeni boş kesit</button>
+    </div>
+    <div class="mgrid">${recs.length ? recs.map(r => `
+      <div class="kcard${linked && linked.id === r.id ? ' cur' : ''}" data-q="${esc(trLow(r.name))}">
+        <div class="kth" data-action="libOpen" data-id="${r.id}">${r.thumb ? `<img src="${r.thumb}" alt="">` : ''}</div>
+        <div class="kin">
+          <b title="${esc(r.name)}">${esc(r.name)}</b>
+          <small>${fmt(r.savedAt)}${linked && linked.id === r.id ? ' · <span class="tag">açık</span>' : ''}</small>
+          <div class="row" style="margin-top:6px">
+            <button class="sm add" data-action="libOpen" data-id="${r.id}">Aç</button>
+            <button class="sm" data-action="libRename" data-id="${r.id}">✎ Ad</button>
+            <button class="sm" data-action="libDup" data-id="${r.id}">⧉ Kopya</button>
+            <span class="sp"></span>
+            <button class="sm del" data-action="libDel" data-id="${r.id}">Sil</button>
+          </div>
+        </div>
+      </div>`).join('') : '<p class="hint" style="grid-column:1/-1;text-align:center;padding:30px 0">Henüz kayıtlı kesit yok. Yukarıdan mevcut kesiti kaydedebilirsin.</p>'}
+    </div>
+    <p class="hint" style="margin:12px 0 0">Kesitler bu bilgisayarda, bu tarayıcının hafızasında saklanır. Başka bir bilgisayara taşımak için “Kaydet (.json)” kullan.</p>`, 'lg');
+}
+async function libAction(a, t){
+  const id = t.dataset.id;
+  switch (a){
+    case 'libSave': await saveToLibrary(document.getElementById('libName').value); return openLibrary();
+    case 'libSaveNew': await saveToLibrary(document.getElementById('libName').value, true); return openLibrary();
+    case 'libNew': closeModal(); return newBlankPage();
+    case 'libOpen': {
+      if (state._lib && state._lib.id === id && !state._dirty){ closeModal(); return; }
+      closeModal();
+      if (!(await guardUnsaved('Başka bir kesit açmadan'))) return openLibrary();
+      closeModal();
+      const r = await KDB.get(id); if (!r) return;
+      loadSection(r.data, {id:r.id, name:r.name}); toast(`“${r.name}” açıldı`); return;
+    }
+    case 'libRename': {
+      const r = await KDB.get(id); const n = prompt('Yeni kesit adı:', r.name); if (!n || !n.trim()) return;
+      r.name = n.trim(); await KDB.put(r);
+      if (state._lib && state._lib.id === id){ state._lib.name = r.name; save(true); }
+      return openLibrary();
+    }
+    case 'libDup': {
+      const r = await KDB.get(id);
+      await KDB.put({...r, id:'k' + Date.now().toString(36) + uid(), name:r.name + ' (kopya)', createdAt:Date.now(), savedAt:Date.now()});
+      return openLibrary();
+    }
+    case 'libDel': {
+      const r = await KDB.get(id);
+      if (!confirm(`“${r.name}” kalıcı olarak silinsin mi?`)) return;
+      await KDB.del(id);
+      if (state._lib && state._lib.id === id){ state._lib = null; state._dirty = true; save(true); }
+      toast('Kesit silindi'); return openLibrary();
+    }
+  }
+}
+async function quickSave(){
+  if (state._lib){ await saveToLibrary(state._lib.name); return; }
+  openLibrary(); setTimeout(() => document.getElementById('libName')?.select(), 60);
 }
 
 /* =========================================================
@@ -2175,6 +2405,15 @@ function save3DPNG(){
 
 /* ---------- Başlat ---------- */
 state = load();
+// Eski sürümden gelen, hiç kaydedilmemiş ve içerik barındıran kesit "kaydedilmemiş" sayılır
+if (state._dirty === undefined) state._dirty = !state._lib && (state.bodies.length > 0 || state.boreholes.length > 0 || state.topo.pts.length > 2);
+updateDocName();
+document.getElementById('modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') closeModal('cancel'); });
+document.addEventListener('input', e => {
+  if (e.target.id !== 'libSearch') return;
+  const q = trLow(e.target.value);
+  document.querySelectorAll('.kcard').forEach(c => c.style.display = !q || c.dataset.q.includes(q) ? '' : 'none');
+});
 if (TABS.some(t => '#' + t[0] === location.hash)) ui.tab = location.hash.slice(1);
 renderPanel();
 scheduleDraw();
