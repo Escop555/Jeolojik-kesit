@@ -121,6 +121,21 @@
   #modal.on{display:flex}
   .mbox{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(15,23,42,.35);padding:18px 20px;width:min(560px,94vw);max-height:88vh;overflow:auto;animation:fadeUp .22s var(--ease)}
   .mbox.lg{width:min(980px,96vw)}
+  .mbox.xl{width:min(1180px,97vw)}
+  /* Görselden arazi profili */
+  .pimp{display:flex;gap:10px;align-items:center;padding:10px 12px;margin:4px 0 10px;background:#f0f7ff;border:1px dashed #9cc3ea;border-radius:10px}
+  .pimp .hint{margin:0;font-size:11.5px}
+  .piwrap{background:#f1f5f9;border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;justify-content:center}
+  #piCv{display:block;touch-action:none}
+  .pistat{font-size:12.5px;padding:8px 11px;border-radius:8px;background:#f4f7fa;color:#334155;margin:4px 0 10px;line-height:1.45}
+  .pistat.ok{background:#e7f4ed;color:#14532d}
+  .pistat.warn{background:#fff4e5;color:#7c2d12}
+  .pilg{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin:7px 2px 10px}
+  .pilg i{display:inline-block;width:18px;height:0;border-top:3px solid;vertical-align:middle;margin-right:5px}
+  .piinfo{font-size:12.5px;color:#334155;padding:9px 11px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;margin-top:10px}
+  .piinfo.err{background:#fff4ee;border-color:#f3d3c4;color:var(--danger)}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  button.on-pick{background:#fff4e5;border-color:#ef6c00;color:#7c2d12;font-weight:600}
   .mbox .mh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   .mbox .mh b{font-size:16px}
   .mbtns{display:flex;gap:8px;margin-top:16px;align-items:center}
@@ -178,6 +193,7 @@
   <button class="pri" data-action="png">PNG indir</button>
   <input type="file" id="file" accept=".json,application/json" hidden>
   <input type="file" id="upl" accept="image/*" hidden>
+  <input type="file" id="profFile" accept="image/*" hidden>
 </header>
 <div id="app">
   <aside>
@@ -514,7 +530,7 @@ function blankState(formations){
   return {
     project:{title:'JEOLOJİK KESİT', dirLeft:'K', dirRight:'G', subtitle:'', notes:''},
     settings:{vex:null, heightRatio:0.3, unit:'auto', elevSuffix:false, vgrid:false,
-              showBhElev:true, showCodes:false, groundStyle:'red', exportScale:3, showHandles:true,
+              showBhElev:true, showCodes:false, showBodyKot:true, groundStyle:'red', exportScale:3, showHandles:true,
               contactNote:'(Formasyon alt sınırı kesit boyunca devam etmektedir.)'},
     formations: formations || defaultFormations(),
     customPatterns:{},
@@ -826,6 +842,40 @@ function axisTicks(cfg, round){
   return out;
 }
 
+/* Eklenen formasyonların sınırlarının sol (kesit başı) ve sağ (kesit sonu) cetvele denk gelen kotları.
+   - Sınır çizgisinin cetvel hizasını kestiği kotlar
+   - Kot ile tanımlı birimin üst/alt kotu ve sabit kotlu alt sınır her iki cetvelde gösterilir */
+function bodyKots(m){
+  const L = [], R = [], top = m.top, base = m.base;
+  const add = (list, v, x) => {
+    if (!isFinite(v) || v > top + 1e-6 || v < base - 1e-6) return;
+    if (v > m.ground(x) - 0.01) return;            // arazi yüzeyindeki nokta değil
+    if (!list.some(k => Math.abs(k - v) < 0.01)) list.push(+v.toFixed(2));
+  };
+  const cross = (edge, X0) => {
+    const out = [];
+    for (let j = 1; j < edge.length; j++){
+      const [x0, y0] = edge[j - 1], [x1, y1] = edge[j];
+      if (x0 === x1 || (x0 - X0) * (x1 - X0) > 0) continue;
+      out.push(y0 + (y1 - y0) * (X0 - x0) / (x1 - x0));
+    }
+    return out;
+  };
+  for (const p of m.polys){
+    for (const e of p.edges){
+      cross(e, m.xmin).forEach(v => add(L, v, m.xmin));
+      cross(e, m.xmax).forEach(v => add(R, v, m.xmax));
+    }
+    const b = p.body, ex = [];
+    if (b.type !== 'poly'){
+      if (b.geo === 'kot'){ ex.push(num(b.bz1), num(b.bz2)); }
+      else if (b.baseMode === 'kot') ex.push(num(b.baseVal));
+    }
+    ex.filter(v => v !== null).forEach(v => { add(L, v, m.xmin); add(R, v, m.xmax); });
+  }
+  return {L, R};
+}
+
 function computeModel(){
   const tp = topoPts();
   if (tp.length < 2) return null;
@@ -851,6 +901,25 @@ function computeModel(){
       if (raw.length < 3) return;
       const K = b.smooth ? 10 : 1, pts = b.smooth ? crClosed(raw, K) : raw;
       polys.push({fid, pts, edges:b.stroke === false ? [] : [[...pts, pts[0]]], body:b, bi, raw, K});
+      return;
+    }
+    if (b.geo === 'kot'){
+      // Yatayda başlangıç–bitiş mesafesi, dikeyde üst–alt kot ile tanımlı dikdörtgen birim
+      const pad = 1e-6 * (xmax - xmin);
+      let xa = num(b.bx1), xb = num(b.bx2), za = num(b.bz1), zb = num(b.bz2);
+      const hasL = xa !== null, hasR = xb !== null, hasT = za !== null, hasB = zb !== null;
+      xa = hasL ? xa : xmin - pad; xb = hasR ? xb : xmax + pad;
+      za = hasT ? za : UP; zb = hasB ? zb : base - R * 0.03;
+      if (xa > xb) [xa, xb] = [xb, xa];
+      if (za < zb) [za, zb] = [zb, za];
+      if (!(xb > xa) || !(za > zb)) return;
+      const pts = [[xa, za], [xb, za], [xb, zb], [xa, zb]];
+      const edges = [];
+      if (hasT) edges.push([[xa, za], [xb, za]]);
+      if (hasB) edges.push([[xa, zb], [xb, zb]]);
+      if (hasL) edges.push([[xa, za], [xa, zb]]);
+      if (hasR) edges.push([[xb, za], [xb, zb]]);
+      polys.push({fid, pts, edges, body:b, bi, raw:null, K:1});
       return;
     }
     const hasL = num(b.x1) !== null, hasR = num(b.x2) !== null;
@@ -1134,10 +1203,13 @@ function draw(canvas, s, edit = false){
   ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(ml, mt - 10); ctx.lineTo(ml, mt + plotH); ctx.lineTo(ml + plotW, mt + plotH); ctx.lineTo(ml + plotW, mt - 10); ctx.stroke();
   ctx.font = FT(20, 'axis'); ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
+  // Formasyon sınırlarının cetvele denk gelen kotları (kırmızı); çakışan normal etiketler gizlenir
+  const BK = S.showBodyKot !== false ? bodyKots(m) : {L:[], R:[]};
+  const clash = (list, el) => list.some(k => Math.abs(Y(k) - Y(el)) < 22 * ta);
   for (const el of leftTicks.filter(inRange)){
     const y = Y(el);
     ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ml - 10, y); ctx.lineTo(ml, y); ctx.stroke();
-    ctx.textAlign = 'right'; ctx.fillText(fmtE(el), ml - 16, y);
+    if (!clash(BK.L, el)){ ctx.textAlign = 'right'; ctx.fillText(fmtE(el), ml - 16, y); }
   }
   for (const el of rightTicks.filter(inRange)){
     const y = Y(el);
@@ -1198,6 +1270,24 @@ function draw(canvas, s, edit = false){
     ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1]))); ctx.stroke(); ctx.setLineDash([]);
   }
   ctx.restore();
+
+  // Formasyon sınır kotları cetvellerde (kırmızı). Etiketler her iki cetvelin hemen solunda.
+  if (BK.L.length || BK.R.length){
+    const C = '#c62828';
+    ctx.save(); ctx.font = FT(20, 'axis'); ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
+    for (const el of BK.L){
+      const y = Y(el);
+      ctx.strokeStyle = C; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ml - 12, y); ctx.lineTo(ml + 10, y); ctx.stroke();
+      ctx.fillStyle = C; ctx.fillText(fmtE(el), ml - 16, y);
+    }
+    for (const el of BK.R){
+      const y = Y(el), t = fmtE(el), w = ctx.measureText(t).width, h = 22 * ta;
+      ctx.strokeStyle = C; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ml + plotW - 10, y); ctx.lineTo(ml + plotW + 12, y); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fillRect(ml + plotW - 16 - w - 4, y - h / 2, w + 8, h);
+      ctx.fillStyle = C; ctx.fillText(t, ml + plotW - 16, y);
+    }
+    ctx.restore();
+  }
 
   // Formasyon kodları
   // Izgara (silik, kesikli)
@@ -1683,6 +1773,11 @@ function panelSection(){
     <h3>3. Arazi profili</h3>
     <p class="hint">Kesitteki çizgiyi fareyle tutup sürükleyerek bükün. Çizginin <b>herhangi bir yerine</b> tıklayıp çekince yeni bir bükülme noktası oluşur.
     Bir noktaya <b>çift tıklayınca</b> nokta silinir. Mavi uç noktalar yalnızca yukarı ve aşağı hareket eder.</p>
+    <div class="pimp">
+      <button class="add" data-action="profImg">🖼️ Görselden profil aktar</button>
+      <span class="hint">Google Earth vb. yükseklik profili görselini seçin, sürükleyip bırakın ya da <b>Ctrl+V</b> ile yapıştırın.</span>
+    </div>
+    ${ui.prevTopo ? `<div class="row" style="margin:-4px 0 10px"><button class="sm" data-action="profUndo">↩ Görselden aktarmadan önceki profile dön</button></div>` : ''}
     <div class="grid" style="grid-template-columns:1fr auto;align-items:end">
       <label>Düz çizgi kotu (m)<input type="number" id="flatElev" step="any" value="${flat}"></label>
       <button data-action="flat">Düz çizgiye sıfırla</button>
@@ -1724,7 +1819,20 @@ function panelSection(){
       return;
     }
     h += `<div class="row" style="margin-top:6px"><button class="sm" data-action="toPoly" data-i="${i}">✋ Elle bükülebilir yap</button></div>
-      <div class="grid g4" style="margin-top:6px">
+      <label style="margin-top:6px">Tanımlama şekli${sel(`bodies.${i}.geo`, [['yuzey','Yüzey mesafeleri ve alt sınır'],['kot','Kot ile (yatay mesafe + dikey kot)']], b.geo || 'yuzey')}</label>`;
+    if (b.geo === 'kot'){
+      h += `<p class="hint" style="margin:6px 0 2px">Yatay: birimin kesit boyunca başladığı ve bittiği mesafe (m). Dikey: üst ve alt sınır kotu (m).
+        Boş bırakılan yatay değer kesit kenarı, boş üst kot arazi yüzeyi, boş alt kot kesit tabanı kabul edilir.</p>
+        <div class="grid g4" style="margin-top:6px">
+          ${fld('Yatay başlangıç (m)', `bodies.${i}.bx1`, b.bx1, {type:'number', ph:'kenar'})}
+          ${fld('Yatay bitiş (m)', `bodies.${i}.bx2`, b.bx2, {type:'number', ph:'kenar'})}
+          ${fld('Dikey başlangıç – üst kot', `bodies.${i}.bz1`, b.bz1, {type:'number', ph:'yüzey'})}
+          ${fld('Dikey bitiş – alt kot', `bodies.${i}.bz2`, b.bz2, {type:'number', ph:'taban'})}
+        </div>
+      </div>`;
+      return;
+    }
+    h += `<div class="grid g4" style="margin-top:6px">
         ${fld('Başlangıç (yüzey)', `bodies.${i}.x1`, b.x1, {type:'number', ph:'kenar'})}
         ${fld('Başlangıç (taban)', `bodies.${i}.x1b`, b.x1b, {type:'number', ph:'aynı'})}
         ${fld('Bitiş (yüzey)', `bodies.${i}.x2`, b.x2, {type:'number', ph:'kenar'})}
@@ -1856,6 +1964,7 @@ function panelSettings(){
     <h3>Görünüm</h3>
     ${chk('Sondaj ağız kotunu göster', 'settings.showBhElev', S.showBhElev)}
     ${chk('Formasyon kodlarını kesit üzerinde göster', 'settings.showCodes', S.showCodes)}
+    ${chk('Formasyon sınır kotlarını cetvellerde göster (kırmızı)', 'settings.showBodyKot', S.showBodyKot !== false)}
     ${chk('Kot değerlerinde "m" göster', 'settings.elevSuffix', S.elevSuffix)}
     ${chk('Yatay ızgara çizgileri (kot değerlerinde)', 'settings.hgrid', S.hgrid)}
     ${chk('Düşey ızgara çizgileri (uzaklık değerlerinde)', 'settings.vgrid', S.vgrid)}
@@ -1911,8 +2020,28 @@ panel.addEventListener('change', e => {
     renderPanel(); return;
   }
   if (el.id === 'topoPts'){ renderPanel(); return; }
+  if (el.dataset.path && el.dataset.path.startsWith('axis.') && fitTopoToAxis()){
+    save(); scheduleDraw(); renderPanel();
+    toast('Arazi çizgisi yeni kot aralığının dışında kalıyordu, aralığın içine taşındı.');
+    return;
+  }
   if (el.dataset.rr) renderPanel();
 });
+
+// Arazi çizgisi kot cetveli aralığının tamamen dışında kalırsa (ör. cetvel 1200–1100, arazi 965)
+// birimler hiç görünmez. Bu durumda çizgi şekli korunarak aralığın içine kaydırılır.
+function fitTopoToAxis(){
+  const {top, base} = axisRange(), pts = state.topo.pts.filter(p => isFinite(p[1]));
+  if (!pts.length) return false;
+  const lo = Math.min(...pts.map(p => p[1])), hi = Math.max(...pts.map(p => p[1]));
+  if (lo <= top && hi >= base) return false;   // en az bir kısmı aralıkta
+  const R = top - base, amp = hi - lo;
+  const target = amp < R * 0.6 ? top - R * 0.35 : (top + base) / 2;
+  const d = target - (lo + hi) / 2;
+  state.topo.pts = state.topo.pts.map(([x, y]) => [x, +(y + d).toFixed(2)]);
+  ui.flatElev = null;
+  return true;
+}
 
 const NEW_ITEM = {
   boreholes: () => ({id:uid(), name:'SK-' + (state.boreholes.length + 1), ch:null, depth:20, elev:null, gwl:null}),
@@ -1941,7 +2070,7 @@ document.addEventListener('click', e => {
     case 'resetScale': setPath(t.dataset.p, 1); break;
     case 'setColor': setPath(t.dataset.p, t.dataset.c || null); break;
     case 'legPos': state.legend.pos = t.dataset.v; ui.zoom = 0; break;
-    case 'addBody': state.bodies.push({id:uid(), fid:state.formations[0].id, x1:null, x1b:null, x2:null, x2b:null, baseMode:'kesit', baseVal:null, basePts:''}); break;
+    case 'addBody': state.bodies.push({id:uid(), fid:state.formations[0].id, x1:null, x1b:null, x2:null, x2b:null, baseMode:'kesit', baseVal:null, basePts:'', geo:'yuzey', bx1:null, bx2:null, bz1:null, bz2:null}); break;
     case 'mvBody': { const j = i + +t.dataset.d; if (j < 0 || j >= state.bodies.length) return; [state.bodies[i], state.bodies[j]] = [state.bodies[j], state.bodies[i]]; break; }
     case 'fopen': if (e.target.closest('input,select,button')) return; ui.fopen = ui.fopen === t.dataset.id ? null : t.dataset.id; renderPanel(); return;
     case 'addForm': { const f = {id:'f-' + uid(), code:'', name:'Yeni Birim', desc:'', age:'', color:'#cccccc', pattern:'v:none', pcolor:'#1a1a1a', pscale:1};
@@ -1953,6 +2082,15 @@ document.addEventListener('click', e => {
       state.formations.splice(i, 1); break;
     }
     case 'upload': uploadIdx = i; document.getElementById('upl').click(); return;
+    case 'profImg': document.getElementById('profFile').click(); return;
+    case 'profUndo': {
+      if (!ui.prevTopo) return;
+      state.topo = ui.prevTopo.topo; state.axis = ui.prevTopo.axis; ui.prevTopo = null; ui.flatElev = null;
+      toast('Önceki arazi profiline dönüldü'); break;
+    }
+    case 'piApply': applyProfileImport(); return;
+    case 'piPick': PI && (PI.pick = !PI.pick, t.classList.toggle('on-pick', PI.pick), drawPI()); return;
+    case 'piAuto': if (PI){ PI.color = PI.autoColor; PI.pick = false; redetectProfile(); } return;
     case 'new': newBlankPage(); return;
     case 'library': openLibrary(); return;
     case 'modalClose': closeModal(); return;
@@ -2006,6 +2144,715 @@ document.getElementById('upl').addEventListener('change', e => {
     URL.revokeObjectURL(im.src); save(); renderPanel(); scheduleDraw();
   };
   im.src = URL.createObjectURL(file);
+});
+
+/* =========================================================
+   GÖRSELDEN ARAZİ PROFİLİ (Google Earth vb. yükseklik profili)
+   1) Arazi çizgisinin rengi otomatik bulunur (ya da görselde tıklanarak seçilir)
+   2) Her sütundaki aday noktalardan sürekliliği en iyi olan yol seçilir;
+      etiket kutuları, yazılar ve ızgara çizgileri böylece elenir
+   3) Kot ve mesafe yazıları yazı tanıma (OCR) ile okunup ölçek kurulur;
+      kullanıcı turuncu (kot) ve yeşil (başlangıç/bitiş) çizgilerle kontrol eder
+   ========================================================= */
+let PI = null;
+const PI_DETAIL = {az:0.02, orta:0.008, cok:0.003};
+const piClamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const piFmt = v => String(+(+v).toFixed(2)).replace('.', ',');
+const isImgFile = f => !!f && (/^image\//.test(f.type || '') || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name || ''));
+
+function loadImageFile(file){
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => { URL.revokeObjectURL(url); res(im); };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('decode')); };
+    im.src = url;
+  });
+}
+
+async function openProfileImport(file){
+  if (!isImgFile(file)){ alert('Lütfen bir görsel dosyası (JPG veya PNG) seçin.'); return; }
+  let im;
+  try { im = await loadImageFile(file); }
+  catch(e){ alert('Görsel açılamadı. Dosya JPG veya PNG olmalı (iPhone HEIC fotoğraflarını önce JPG olarak kaydedin).'); return; }
+  const nw = im.naturalWidth, nh = im.naturalHeight;
+  if (nw < 60 || nh < 40){ alert('Görsel çok küçük; profil okunamaz.'); return; }
+  const k = Math.min(1, 2600 / Math.max(nw, nh));
+  const w = Math.round(nw * k), h = Math.round(nh * k);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d', {willReadFrequently:true});
+  g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(im, 0, 0, w, h);
+  const data = g.getImageData(0, 0, w, h).data;
+  const auto = guessLineColor(data, w, h);
+  PI = {id:uid(), name:file.name || 'Yapıştırılan görsel', src:c, w, h, data, color:auto, autoColor:auto,
+        path:null, x0:0, x1:w - 1, xs:0, xe:w - 1, y1:null, y2:null, v1:null, v2:null, L:null, mpp:null,
+        detail:'orta', fitAxis:true, pick:false, touchedY:false, touchedL:false, grid:[], ocr:'run', drag:null, mouse:null};
+  detectProfile(PI);
+  setDefaultRefs(PI);
+  showProfileModal();
+  runProfileOCR(PI);
+}
+
+// Görselde en çok bulunan koyu ve renkli ton = profil çizgisi. Renkli ton yoksa koyu (siyah) çizgi aranır.
+function guessLineColor(d, w, h){
+  const step = Math.max(1, Math.floor(Math.sqrt(w * h / 600000)));
+  const bins = new Map(), dark = [0, 0, 0, 0];
+  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step){
+    const i = (y * w + x) * 4, r = d[i], g = d[i+1], b = d[i+2];
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b, ch = Math.max(r, g, b) - Math.min(r, g, b);
+    if (lum < 175 && ch > 60){
+      const key = (r >> 4) * 256 + (g >> 4) * 16 + (b >> 4), e = bins.get(key);
+      if (e){ e[0]++; e[1] += r; e[2] += g; e[3] += b; } else bins.set(key, [1, r, g, b]);
+    } else if (lum < 90){ dark[0]++; dark[1] += r; dark[2] += g; dark[3] += b; }
+  }
+  const around = key => {
+    const r = key >> 8, g = (key >> 4) & 15, b = key & 15, s = [0, 0, 0, 0];
+    for (let dr = -1; dr <= 1; dr++) for (let dg = -1; dg <= 1; dg++) for (let db = -1; db <= 1; db++){
+      const rr = r + dr, gg = g + dg, bb = b + db;
+      if (rr < 0 || gg < 0 || bb < 0 || rr > 15 || gg > 15 || bb > 15) continue;
+      const e = bins.get(rr * 256 + gg * 16 + bb); if (e) for (let q = 0; q < 4; q++) s[q] += e[q];
+    }
+    return s;
+  };
+  let bestK = -1, bestN = 0;
+  for (const key of bins.keys()){ const n = around(key)[0]; if (n > bestN){ bestN = n; bestK = key; } }
+  if (bestK >= 0 && bestN >= (w / step) * 0.25){
+    const s = around(bestK);
+    return {r:s[1] / s[0], g:s[2] / s[0], b:s[3] / s[0], dark:false};
+  }
+  if (dark[0]) return {r:dark[1] / dark[0], g:dark[2] / dark[0], b:dark[3] / dark[0], dark:true};
+  return {r:0, g:0, b:0, dark:true};
+}
+
+function detectProfile(P){
+  const {w, h, data:d, color:C} = P;
+  const tol = C.dark ? 95 : 85, tol2 = tol * tol;
+  const M = new Uint8Array(w * h), rowN = new Int32Array(h), colN = new Int32Array(w);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){
+    const i = (y * w + x) * 4, dr = d[i] - C.r, dg = d[i+1] - C.g, db = d[i+2] - C.b;
+    if (dr * dr + dg * dg + db * db < tol2){ M[y * w + x] = 1; rowN[y]++; colN[x]++; }
+  }
+  // Boydan boya düz çizgiler (eksen, çerçeve) profil değildir
+  for (let y = 0; y < h; y++) if (rowN[y] > w * 0.75) M.fill(0, y * w, y * w + w);
+  // Dikey eksen çizgileri profilin geçemeyeceği sınırdır (eksenin dışındaki yazılar profile eklenmez)
+  const bar = new Int32Array(w + 1);
+  for (let x = 0; x < w; x++){
+    const isBar = colN[x] > h * 0.75;
+    if (isBar) for (let y = 0; y < h; y++) M[y * w + x] = 0;
+    bar[x + 1] = bar[x] + (isBar ? 1 : 0);
+  }
+  const crossesBar = (xa, xb) => bar[Math.max(xa, xb)] - bar[Math.min(xa, xb) + 1] > 0;
+
+  // Her sütundaki kesintisiz parçalar
+  const runs = [], lens = [];
+  for (let x = 0; x < w; x++){
+    const R = []; let a = -1;
+    for (let y = 0; y <= h; y++){
+      const on = y < h && M[y * w + x];
+      if (on && a < 0) a = y;
+      else if (!on && a >= 0){ R.push([a, y - 1]); lens.push(y - a); a = -1; }
+    }
+    runs.push(R);
+  }
+  P.path = null;
+  if (!lens.length) return;
+  lens.sort((a, b) => a - b);
+  const T = Math.max(1, lens[lens.length >> 1]);
+  const filled = T > h * 0.12;              // çizgi değil dolu alan: üst kenar alınır
+  const cand = runs.map(R => {
+    const out = [];
+    for (const [a, b] of R){
+      if (filled){ out.push([a, 0, a, b]); continue; }
+      out.push([(a + b) / 2, 0, a, b]);
+      // Çizgiye yapışık etiket kutusu vb.: parçanın üst ve alt kenarı da aday
+      if (b - a + 1 > T * 2.5){ out.push([a + (T - 1) / 2, 3, a, b]); out.push([b - (T - 1) / 2, 3, a, b]); }
+    }
+    return out.length > 30 ? out.slice(0, 30) : out;
+  });
+
+  // En iyi yol (dinamik programlama): kapsanan her sütun ödül, dikey sıçrama ceza
+  const K = Math.max(6, Math.round(w * 0.03)), RW = 6;
+  const best = new Array(w), bx = new Array(w), bj = new Array(w);
+  let gBest = Infinity, gx = -1, gj = -1;
+  for (let x = 0; x < w; x++){
+    const C1 = cand[x], n = C1.length;
+    const B = new Float64Array(n), PX = new Int32Array(n).fill(-1), PJ = new Int32Array(n).fill(-1);
+    for (let i = 0; i < n; i++){
+      const y = C1[i][0]; let m = 0, px = -1, pj = -1;
+      for (let k = 1; k <= K && x - k >= 0; k++){
+        const C0 = cand[x - k], B0 = best[x - k];
+        for (let j = 0; j < C0.length; j++){
+          const v = B0[j] + Math.abs(y - C0[j][0]);
+          if (v < m){ m = v; px = x - k; pj = j; }
+        }
+      }
+      B[i] = m + C1[i][1] - RW; PX[i] = px; PJ[i] = pj;
+      if (B[i] < gBest){ gBest = B[i]; gx = x; gj = i; }
+    }
+    best[x] = B; bx[x] = PX; bj[x] = PJ;
+  }
+  if (gx < 0) return;
+  const chosen = [];
+  for (let x = gx, j = gj; x >= 0 && j >= 0;){ const c = cand[x][j]; chosen.push({x, y:c[0], a:c[2], b:c[3]}); const px = bx[x][j], pj = bj[x][j]; x = px; j = pj; }
+  chosen.reverse();
+  // Yolu birbirine değen parçalara ayır; ana parçaya düzgün bağlanmayan kısa parçalar (yazı, simge) atılır
+  const segs = [];
+  for (const c of chosen){
+    const s = segs[segs.length - 1], p = s && s.pts[s.pts.length - 1];
+    if (p && c.x - p.x <= 2 && c.a <= p.b + 2 && c.b >= p.a - 2 && !crossesBar(p.x, c.x)) s.pts.push(c);
+    else segs.push({pts:[c]});
+  }
+  let mi = 0; segs.forEach((s, i) => { if (s.pts.length > segs[mi].pts.length) mi = i; });
+  const keep = new Set([mi]);
+  const joins = (A, B, gap) => gap <= K && Math.abs(A.y - B.y) <= Math.max(2 * T + 2, gap + T) && !crossesBar(A.x, B.x);
+  for (let dir = -1; dir <= 1; dir += 2){
+    let cur = segs[mi];
+    for (let i = mi + dir; i >= 0 && i < segs.length; i += dir){
+      const S = segs[i];
+      const A = dir < 0 ? cur.pts[0] : cur.pts[cur.pts.length - 1], B = dir < 0 ? S.pts[S.pts.length - 1] : S.pts[0];
+      const gap = Math.abs(A.x - B.x);
+      if (gap > K) break;
+      if (joins(A, B, gap)){ keep.add(i); cur = S; }
+    }
+  }
+  const path = new Float64Array(w).fill(NaN);
+  segs.forEach((s, i) => { if (keep.has(i)) s.pts.forEach(c => { path[c.x] = c.y; }); });
+  let x0 = -1, x1 = -1;
+  for (let x = 0; x < w; x++) if (isFinite(path[x])){ if (x0 < 0) x0 = x; x1 = x; }
+  if (x0 < 0 || x1 - x0 < w * 0.1) return;
+  // Boşlukları doğrusal doldur
+  for (let x = x0, last = x0; x <= x1; x++){
+    if (!isFinite(path[x])) continue;
+    for (let q = last + 1; q < x; q++) path[q] = path[last] + (path[x] - path[last]) * (q - last) / (x - last);
+    last = x;
+  }
+  P.path = path; P.x0 = x0; P.x1 = x1; P.xs = x0; P.xe = x1; P.thick = T;
+  P.grid = findGridRows(P);
+}
+
+// Yatay ızgara çizgileri (referans çizgilerini bunlara yapıştırmak için)
+function findGridRows(P){
+  const {w, h, data:d, x0, x1} = P, lum = (x, y) => { const i = (y * w + x) * 4; return 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]; };
+  const sx = Math.max(1, Math.floor((x1 - x0 + 1) / 700)), rows = [], S = new Float64Array(h);
+  for (let y = 2; y < h - 2; y++){
+    let n = 0, c = 0, s = 0;
+    for (let x = x0; x <= x1; x += sx){ n++; const dv = Math.abs(lum(x, y) - (lum(x, y - 2) + lum(x, y + 2)) / 2); s += dv; if (dv > 5) c++; }
+    S[y] = s / n;
+    if (c > n * 0.55) rows.push(y);
+  }
+  // Yakın satırlardan en belirgin olanı (çizginin ±2 komşuları da işaretlenir)
+  const out = [];
+  for (let i = 0; i < rows.length;){
+    let j = i; while (j + 1 < rows.length && rows[j + 1] - rows[j] <= 3) j++;
+    let m = rows[i]; for (let q = i; q <= j; q++) if (S[rows[q]] > S[m]) m = rows[q];
+    const ties = rows.slice(i, j + 1).filter(r => Math.abs(S[r] - S[m]) < 1e-9 && Math.abs(r - m) <= 1);
+    out.push(ties.reduce((a, b) => a + b, 0) / ties.length);
+    i = j + 1;
+  }
+  return out;
+}
+// Dikey ızgara çizgileri (mesafe yazıları bunların hizasındadır)
+function findGridCols(P){
+  const {w, h, data:d, x0, x1, path} = P, lum = (x, y) => { const i = (y * w + x) * 4; return 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]; };
+  let y0 = Infinity, y1 = -Infinity;
+  for (let x = x0; x <= x1; x++) if (isFinite(path[x])){ y0 = Math.min(y0, path[x]); y1 = Math.max(y1, path[x]); }
+  y0 = Math.max(2, Math.floor(y0)); y1 = Math.min(h - 3, Math.ceil(y1));
+  if (y1 - y0 < 10) return [];
+  const sy = Math.max(1, Math.floor((y1 - y0 + 1) / 400)), cols = [], S = new Float64Array(w);
+  for (let x = Math.max(2, x0); x <= Math.min(w - 3, x1); x++){
+    let n = 0, c = 0, s = 0;
+    for (let y = y0; y <= y1; y += sy){ n++; const dv = Math.abs(lum(x, y) - (lum(x - 2, y) + lum(x + 2, y)) / 2); s += dv; if (dv > 5) c++; }
+    S[x] = s / n;
+    if (c > n * 0.55) cols.push(x);
+  }
+  const out = [];
+  for (let i = 0; i < cols.length;){
+    let j = i; while (j + 1 < cols.length && cols[j + 1] - cols[j] <= 3) j++;
+    let m = cols[i]; for (let q = i; q <= j; q++) if (S[cols[q]] > S[m]) m = cols[q];
+    out.push(m); i = j + 1;
+  }
+  return out;
+}
+function snapTo(list, v, tol){
+  let best = v, bd = tol;
+  for (const g of list){ const dd = Math.abs(g - v); if (dd <= bd){ bd = dd; best = g; } }
+  return best;
+}
+function snapGrid(P, y, tol){
+  let best = y, bd = tol;
+  for (const g of P.grid){ const dd = Math.abs(g - y); if (dd <= bd){ bd = dd; best = g; } }
+  return best;
+}
+function setDefaultRefs(P){
+  let lo = P.h * 0.2, hi = P.h * 0.8;
+  if (P.path){
+    let a = Infinity, b = -Infinity;
+    for (let x = P.x0; x <= P.x1; x++){ a = Math.min(a, P.path[x]); b = Math.max(b, P.path[x]); }
+    if (b - a > 10){ lo = a; hi = b; }
+  }
+  const t1 = lo + (hi - lo) * 0.1, t2 = hi - (hi - lo) * 0.1;
+  const near = t => P.grid.reduce((m, g) => Math.abs(g - t) < Math.abs(m - t) ? g : m, Infinity);
+  const g1 = near(t1), g2 = near(t2);
+  if (isFinite(g1) && isFinite(g2) && g2 - g1 > (hi - lo) * 0.3){ P.y1 = g1; P.y2 = g2; }
+  else { P.y1 = Math.round(lo); P.y2 = Math.round(hi); }
+}
+function redetectProfile(){
+  const P = PI; if (!P) return;
+  detectProfile(P);
+  if (P.path && P.mpp && !P.touchedL) P.L = Math.round(P.mpp * (P.xe - P.xs));
+  if (!P.touchedY && P.ocr !== 'ok') setDefaultRefs(P);
+  const b = document.querySelector('[data-action="piPick"]'); if (b) b.classList.remove('on-pick');
+  setPIStatus(); updatePI();
+}
+function pickLineColor(x, y){
+  const P = PI; let best = null, bl = Infinity;
+  for (let yy = Math.round(y) - 3; yy <= Math.round(y) + 3; yy++) for (let xx = Math.round(x) - 3; xx <= Math.round(x) + 3; xx++){
+    if (xx < 0 || yy < 0 || xx >= P.w || yy >= P.h) continue;
+    const i = (yy * P.w + xx) * 4, l = 0.299 * P.data[i] + 0.587 * P.data[i+1] + 0.114 * P.data[i+2];
+    if (l < bl){ bl = l; best = i; }
+  }
+  if (best === null) return;
+  const r = P.data[best], g = P.data[best+1], b = P.data[best+2];
+  P.color = {r, g, b, dark:Math.max(r, g, b) - Math.min(r, g, b) < 40};
+  P.pick = false; redetectProfile();
+}
+
+/* ---- Yazı tanıma: kot ve mesafe etiketleri ---- */
+let ocrWorkerP = null;
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('zaman aşımı')), ms))]);
+function loadScript(src){
+  return new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src;
+    s.onload = res; s.onerror = () => { s.remove(); rej(new Error('yüklenemedi')); };
+    document.head.appendChild(s);
+  });
+}
+function getOCRWorker(){
+  if (!ocrWorkerP) ocrWorkerP = (async () => {
+    if (!window.Tesseract) await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
+    const wk = await Tesseract.createWorker('eng');
+    await wk.setParameters({tessedit_pageseg_mode:'11', tessedit_char_whitelist:'0123456789.,-km '});
+    return wk;
+  })().catch(e => { ocrWorkerP = null; throw e; });
+  return ocrWorkerP;
+}
+// Görselin bir şeridini büyütüp gri tona çevirerek okur. Koyu zeminli satırlar (ör. alttaki koyu mesafe bandı) ters çevrilir.
+async function ocrStrip(wk, P, rx, ry, rw, rh, sc, psm){
+  rx = Math.max(0, Math.floor(rx)); ry = Math.max(0, Math.floor(ry));
+  rw = Math.min(P.w - rx, Math.ceil(rw)); rh = Math.min(P.h - ry, Math.ceil(rh));
+  if (rw < 8 || rh < 6) return [];
+  const c = document.createElement('canvas'); c.width = Math.round(rw * sc); c.height = Math.round(rh * sc);
+  const g = c.getContext('2d', {willReadFrequently:true}); g.imageSmoothingQuality = 'high';
+  g.drawImage(P.src, rx, ry, rw, rh, 0, 0, c.width, c.height);
+  const id = g.getImageData(0, 0, c.width, c.height), d = id.data, W = c.width;
+  for (let i = 0; i < d.length; i += 4){ const v = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]; d[i] = d[i+1] = d[i+2] = v; }
+  for (let y = 0; y < c.height; y++){
+    const row = []; for (let x = 0; x < W; x += 3) row.push(d[(y * W + x) * 4]);
+    row.sort((a, b) => a - b);
+    if (row[row.length >> 1] < 110) for (let x = 0; x < W; x++){ const i = (y * W + x) * 4; d[i] = d[i+1] = d[i+2] = 255 - d[i]; }
+  }
+  g.putImageData(id, 0, 0);
+  await wk.setParameters({tessedit_pageseg_mode:String(psm)});
+  const {data} = await withTimeout(wk.recognize(c), 60000);
+  return (data.words || []).map(wd => ({t:String(wd.text || ''), x0:rx + wd.bbox.x0 / sc, x1:rx + wd.bbox.x1 / sc, y0:ry + wd.bbox.y0 / sc, y1:ry + wd.bbox.y1 / sc}));
+}
+async function runProfileOCR(P){
+  P.ocr = 'run'; setPIStatus();
+  try {
+    const wk = await withTimeout(getOCRWorker(), 60000);
+    if (PI !== P) return;
+    const sc = piClamp(6400 / P.w, 1.5, 4);
+    // Kot yazıları genelde profilin solunda (ya da sağında), mesafe yazıları altında
+    const strips = [];
+    strips.push([0, 0, P.path && P.x0 > P.w * 0.02 ? P.x0 + 2 : P.w * 0.15, P.h]);
+    if (P.path && P.w - P.x1 > P.w * 0.02) strips.push([P.x1 - 2, 0, P.w - P.x1 + 2, P.h]);
+    let maxY = P.h * 0.6;
+    if (P.path) for (let x = P.x0; x <= P.x1; x++) maxY = Math.max(maxY, P.path[x]);
+    const yb = piClamp(maxY + 2, P.h * 0.5, P.h * 0.92);
+    strips.push([0, yb, P.w, P.h - yb]);
+    const words = [];
+    for (const [x, y, w, h] of strips) for (const psm of [11, 6]){
+      words.push(...await ocrStrip(wk, P, x, y, w, h, sc, psm));
+      if (PI !== P) return;
+    }
+    applyOCR(P, words);
+  } catch(e){
+    console.warn('OCR:', e);
+    if (PI !== P) return;
+    P.ocr = 'fail';
+  }
+  if (PI === P){ setPIStatus(); updatePI(); }
+}
+// Okunan kelimelerden sayılar. Küçük yazılarda ondalık nokta sık kaçtığı için (3.62 → 362)
+// km ve birimsiz sayılarda noktalı okunuşlar da aday olarak tutulur; doğru olanı ölçek uyumu seçer.
+function parseLabels(words){
+  const items = [];
+  for (const wd of words){
+    const t = wd.t.replace(/\s+/g, '').replace(/[–—]/g, '-');
+    const m = t.match(/^(-?[\d.,]*\d)(k?m)?\.?$/i); if (!m) continue;
+    let s = m[1], unit = (m[2] || '').toLowerCase(), x1 = wd.x1;
+    const hh = Math.max(1, wd.y1 - wd.y0), cy = (wd.y0 + wd.y1) / 2;
+    if (!unit){   // birim ayrı kelime olarak okunmuş olabilir: "1510" "m"
+      const nx = words.find(o => o !== wd && /^k?m\.?$/i.test(o.t.trim()) && o.x0 >= wd.x1 - 2 && o.x0 - wd.x1 < hh * 1.6 && Math.abs((o.y0 + o.y1) / 2 - cy) < hh * 0.6);
+      if (nx){ unit = nx.t.trim().toLowerCase().replace('.', ''); x1 = nx.x1; }
+    }
+    const alts = [];
+    if (/^-?\d{1,3}(,\d{3})+$/.test(s)) s = s.replace(/,/g, '');                          // 1,510
+    else if (/^-?\d{1,3}(\.\d{3})+$/.test(s) && unit !== 'km') s = s.replace(/\./g, '');  // 1.510 m
+    else { if ((s.match(/[.,]/g) || []).length > 1) continue; s = s.replace(',', '.'); }
+    const v = parseFloat(s); if (!isFinite(v)) continue;
+    alts.push(v);
+    const digits = s.replace('-', '');
+    if (unit !== 'm' && /^\d{2,5}$/.test(digits))
+      for (let q = 1; q < digits.length; q++) alts.push(+((s.startsWith('-') ? '-' : '') + digits.slice(0, q) + '.' + digits.slice(q)));
+    items.push({alts, prim:v, unit, cx:(wd.x0 + x1) / 2 - 0.5, cy:cy - 0.5, hh, len:digits.length + (unit ? 1 : 0)});
+  }
+  // Farklı geçişlerde aynı yazı birden çok kez okunur: aynı yerdekiler birleştirilir
+  // (konum olarak en eksiksiz okunuşunki alınır)
+  const out = [];
+  for (const it of items){
+    const o = out.find(q => Math.abs(q.cx - it.cx) < Math.max(q.hh, it.hh) * 1.5 && Math.abs(q.cy - it.cy) < Math.max(q.hh, it.hh) * 0.6);
+    if (!o){ out.push({...it, prims:[it.prim]}); continue; }
+    it.alts.forEach(v => { if (!o.alts.includes(v)) o.alts.push(v); });
+    if (!o.prims.includes(it.prim)) o.prims.push(it.prim);
+    if (!o.unit) o.unit = it.unit;
+    if (it.len > o.len){ o.cx = it.cx; o.cy = it.cy; o.hh = it.hh; o.len = it.len; }
+  }
+  return out;
+}
+function niceRound(v){
+  const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p;
+  return [1, 2, 2.5, 5, 10].reduce((a, b) => Math.abs(b - m) < Math.abs(a - m) ? b : a) * p;
+}
+// Aynı hizadaki (sütun ya da satır) sayılar arasından doğrusal ölçeğe uyan en büyük grup
+function fitLabels(L, along, across, sign, tolAcross){
+  const items = L.slice().sort((a, b) => a[across] - b[across]), groups = [];
+  let cur = [];
+  for (const it of items){ if (cur.length && it[across] - cur[cur.length - 1][across] > tolAcross){ groups.push(cur); cur = []; } cur.push(it); }
+  if (cur.length) groups.push(cur);
+  let best = null;
+  for (const G of groups){
+    if (G.length < 3) continue;
+    const ps = G.map(o => o[along]).sort((a, b) => a - b), gaps = [];
+    for (let i = 1; i < ps.length; i++) if (ps[i] - ps[i - 1] > 2) gaps.push(ps[i] - ps[i - 1]);
+    gaps.sort((a, b) => a - b);
+    const tol = Math.max(2.5, (gaps[gaps.length >> 1] || 0) * 0.22);
+    for (let i = 0; i < G.length; i++) for (let j = i + 1; j < G.length; j++){
+      const A = G[i], B = G[j], dp = B[along] - A[along]; if (Math.abs(dp) < 3) continue;
+      for (const va of A.alts) for (const vb of B.alts){
+        const a = (vb - va) / dp; if (!(a * sign > 0)) continue;
+        const b = va - a * A[along];
+        const inl = [], seen = new Set();
+        let res = 0, prim = 0;
+        for (const o of G){
+          let bv = null, br = tol;
+          for (const v of o.alts){ const r = Math.abs(o[along] - (v - b) / a); if (r < br){ br = r; bv = v; } }
+          if (bv === null || seen.has(bv)) continue;
+          seen.add(bv); inl.push({...o, v:bv}); res += br; if (o.prims.includes(bv)) prim++;
+        }
+        const score = inl.length + prim * 0.01 - res * 1e-4;
+        if (!best || score > best.score) best = {score, inl};
+      }
+    }
+  }
+  if (!best || best.inl.length < 3) return null;
+  // Adım (ör. 0,25 km ya da 10 m) bulunur; ölçek yalnızca adımın katı olan (doğru okunmuş) yazılarla kurulur
+  const vs = [...new Set(best.inl.map(o => o.v))].sort((a, b) => a - b), dv = [];
+  for (let i = 1; i < vs.length; i++) dv.push(vs[i] - vs[i - 1]);
+  dv.sort((a, b) => a - b);
+  const step = dv.length ? niceRound(dv[dv.length >> 1]) : 0;
+  const onGrid = step > 0 ? best.inl.filter(o => Math.abs(o.v / step - Math.round(o.v / step)) < 1e-6) : [];
+  const lsq = I => {
+    const n = I.length; let sp = 0, sv = 0, spp = 0, spv = 0;
+    I.forEach(o => { const p = o[along]; sp += p; sv += o.v; spp += p * p; spv += p * o.v; });
+    const den = n * spp - sp * sp; if (!den) return null;
+    const a = (n * spv - sp * sv) / den; return {a, b:(sv - a * sp) / n};
+  };
+  const med = arr => { const s = arr.slice().sort((x, y) => x - y), k = s.length >> 1; return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2; };
+  let I = onGrid.length >= 3 ? onGrid : best.inl;
+  // Kutusu kaymış okunan yazılar (köşedeki yazıya karışma vb.) ayıklanır:
+  // önce aykırı değerlerden etkilenmeyen medyan eğim (Theil–Sen), sonra kalanlarla en küçük kareler
+  if (I.length > 3){
+    const sl = [];
+    for (let i = 0; i < I.length; i++) for (let j = i + 1; j < I.length; j++){ const dp = I[j][along] - I[i][along]; if (Math.abs(dp) > 1) sl.push((I[j].v - I[i].v) / dp); }
+    const a = med(sl), b = med(I.map(o => o.v - a * o[along]));
+    if (a * sign > 0){
+      const res = I.map(o => Math.abs(o[along] - (o.v - b) / a));
+      const thr = Math.max(1.5, 3 * 1.4826 * med(res));
+      const J = I.filter((o, i) => res[i] <= thr);
+      if (J.length >= 3) I = J;
+    }
+  }
+  const F = lsq(I);
+  if (!F || !(F.a * sign > 0)) return null;
+  return {a:F.a, b:F.b, inl:I, step};
+}
+function applyOCR(P, words){
+  const L = parseLabels(words);
+  const hs = L.map(o => o.hh).sort((a, b) => a - b), hMed = hs[hs.length >> 1] || 10;
+  // Yazılar ait oldukları ızgara çizgisine oturtulur (yazı kutusunun konumu birkaç piksel oynak olabilir)
+  const cols = P.path ? findGridCols(P) : [];
+  const spacing = list => { const g = []; for (let i = 1; i < list.length; i++) g.push(list[i] - list[i - 1]); g.sort((a, b) => a - b); return g[g.length >> 1] || Infinity; };
+  const tolY = Math.min(spacing(P.grid) * 0.3, hMed * 1.2), tolX = Math.min(spacing(cols) * 0.3, hMed * 2.5);
+  const Ls = L.map(o => ({...o, cx:snapTo(cols, o.cx, tolX), cy:snapTo(P.grid, o.cy, tolY), gx:o.cx, gy:o.cy}));
+  const fy = fitLabels(Ls.map(o => ({...o, cx:o.gx})), 'cy', 'cx', -1, Math.max(10, P.w * 0.03));
+  const fx = fitLabels(Ls.map(o => ({...o, cy:o.gy})), 'cx', 'cy', 1, Math.max(4, hMed * 0.7));
+  P.ocrY = !!fy; P.ocrX = !!fx;
+  if (fy && !P.touchedY){
+    const vs = fy.inl.map(o => o.v), vT = Math.max(...vs), vB = Math.min(...vs);
+    P.y1 = snapGrid(P, (vT - fy.b) / fy.a, 3); P.v1 = vT;
+    P.y2 = snapGrid(P, (vB - fy.b) / fy.a, 3); P.v2 = vB;
+  }
+  if (fx){
+    const us = fx.inl.map(o => o.unit), km = us.filter(u => u === 'km').length, m = us.filter(u => u === 'm').length;
+    const vs = fx.inl.map(o => o.v);
+    const isKm = km > m || (!km && !m && Math.max(...vs) <= 100 && vs.some(v => v % 1 !== 0));
+    P.mpp = fx.a * (isKm ? 1000 : 1);
+    if (P.path && !P.touchedL) P.L = Math.round(P.mpp * (P.xe - P.xs));
+  }
+  P.ocrDbg = {fy, fx, n:L.length};
+  P.ocr = fy || fx ? 'ok' : 'none';
+}
+
+/* ---- Pencere ---- */
+function showProfileModal(){
+  const P = PI;
+  showModal(`<div class="mh"><b>🖼️ Görselden arazi profili</b><span class="hint" style="margin:0 0 0 6px">${esc(P.name)}</span>
+      <span class="sp"></span><button class="sm" data-action="modalClose">✕</button></div>
+    <div id="piStatus" class="pistat"></div>
+    <div class="piwrap" id="piWrap"><canvas id="piCv"></canvas></div>
+    <div class="pilg">
+      <span><i style="border-color:#1565c0"></i>Bulunan arazi çizgisi</span>
+      <span><i style="border-color:#ef6c00;border-top-style:dashed"></i>Kot referans çizgileri (sürükleyin)</span>
+      <span><i style="border-color:#2e7d32"></i>Profil başı / sonu (sürükleyerek kırpın)</span>
+    </div>
+    <div class="grid g3">
+      <label>Üst turuncu çizginin kotu (m)<input type="number" step="any" id="piV1"></label>
+      <label>Alt turuncu çizginin kotu (m)<input type="number" step="any" id="piV2"></label>
+      <label>Kesit uzunluğu – yeşil çizgiler arası (m)<input type="number" step="any" min="0" id="piL"></label>
+    </div>
+    <div class="row" style="margin-top:10px;flex-wrap:wrap">
+      <label style="flex-direction:row;align-items:center;gap:6px;color:var(--ink);font-size:12.5px">Nokta yoğunluğu
+        <select id="piDetail" style="width:auto"><option value="az">Az (sade)</option><option value="orta" selected>Orta</option><option value="cok">Çok (ayrıntılı)</option></select></label>
+      <span style="width:8px"></span>
+      <button class="sm" data-action="piPick" title="Çizgi yanlış bulunduysa görseldeki arazi çizgisine tıklayın">🎯 Çizgi rengini seç</button>
+      <span id="piSw" title="Aranan çizgi rengi" style="width:18px;height:18px;border-radius:4px;border:1px solid #94a3b8;display:inline-block"></span>
+      <button class="sm" data-action="piAuto" title="Çizgi rengini yeniden otomatik bul">Otomatik</button>
+      <span class="sp"></span>
+      <label class="chk" style="margin:0"><input type="checkbox" id="piFit" checked> Kot cetvelini profile göre ayarla</label>
+    </div>
+    <div id="piInfo" class="piinfo"></div>
+    <div class="mbtns">
+      <button class="add" id="piApply" data-action="piApply">✔ Profili kesite aktar</button>
+      <span class="hint" style="margin:0">Mevcut arazi çizgisinin yerini alır. Aktardıktan sonra noktalar kesit üzerinde sürüklenerek düzenlenebilir.</span>
+      <span class="sp"></span>
+      <button data-action="modalClose">Vazgeç</button>
+    </div>`, 'xl');
+  const cv = document.getElementById('piCv'), wrap = document.getElementById('piWrap');
+  const availW = Math.max(200, wrap.clientWidth - 14), availH = Math.max(180, window.innerHeight * 0.48);
+  P.s = Math.min(availW / P.w, availH / P.h, 3);
+  const cw = Math.round(P.w * P.s), ch = Math.round(P.h * P.s);
+  P.dpr = window.devicePixelRatio || 1;
+  cv.style.width = cw + 'px'; cv.style.height = ch + 'px';
+  cv.width = Math.round(cw * P.dpr); cv.height = Math.round(ch * P.dpr);
+  cv.onpointerdown = piDown; cv.onpointermove = piMove; cv.onpointerup = cv.onpointercancel = piUp;
+  cv.onpointerleave = () => { if (PI && !PI.drag){ PI.mouse = null; drawPI(); } };
+  setPIStatus(); updatePI();
+}
+function setPIStatus(){
+  const el = document.getElementById('piStatus'), P = PI; if (!el || !P) return;
+  let cls = '', msg;
+  if (!P.path){ cls = 'warn'; msg = '⚠ Görselde arazi çizgisi bulunamadı. <b>🎯 Çizgi rengini seç</b> düğmesine basıp görseldeki arazi çizgisinin üzerine tıklayın.'; }
+  else if (P.ocr === 'run') msg = '⏳ Arazi çizgisi bulundu (mavi). Görseldeki kot ve mesafe yazıları okunuyor… İlk seferde birkaç saniye sürebilir; beklemeden değerleri kendiniz de girebilirsiniz.';
+  else if (P.ocr === 'ok' && P.ocrY && P.ocrX){ cls = 'ok'; msg = `✔ Kotlar ve kesit uzunluğu görseldeki yazılardan okundu. Turuncu çizgilerin, kotu yazılan ızgara çizgilerinin üzerinde olduğunu kontrol edin; gerekirse sürükleyin ya da değerleri düzeltin.`; }
+  else if (P.ocr === 'ok'){ cls = 'warn'; msg = P.ocrY ? '✔ Kotlar okundu. Mesafe yazıları okunamadı: <b>kesit uzunluğunu</b> girin (görselin altındaki son mesafe değeri).'
+                                                       : '✔ Kesit uzunluğu okundu. Kot yazıları okunamadı: turuncu çizgileri iki kot çizgisinin üzerine sürükleyip <b>kotlarını</b> girin.'; }
+  else { cls = 'warn'; msg = '⚠ Görseldeki yazılar otomatik okunamadı' + (P.ocr === 'fail' ? ' (otomatik okuma için internet bağlantısı gerekir)' : '') +
+                       '. Turuncu çizgileri kotu bilinen iki yatay çizginin üzerine sürükleyip <b>kotlarını</b>, ardından <b>kesit uzunluğunu</b> girin.'; }
+  el.className = 'pistat' + (cls ? ' ' + cls : ''); el.innerHTML = msg;
+}
+function updatePI(){
+  const P = PI; if (!P || !document.getElementById('piCv')) return;
+  const setV = (id, v) => { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = v == null ? '' : +(+v).toFixed(2); };
+  setV('piV1', P.v1); setV('piV2', P.v2); setV('piL', P.L);
+  const sw = document.getElementById('piSw'); if (sw) sw.style.background = `rgb(${P.color.r | 0},${P.color.g | 0},${P.color.b | 0})`;
+  const r = buildProfilePts(), info = document.getElementById('piInfo'), ap = document.getElementById('piApply');
+  info.className = 'piinfo' + (r.err ? ' err' : '');
+  info.innerHTML = r.err ? '⚠ ' + r.err
+    : `✔ Aktarılacak profil: <b>${r.pts.length}</b> nokta · uzunluk <b>${piFmt(P.L)} m</b> · en düşük kot <b>${piFmt(r.min)} m</b> · en yüksek kot <b>${piFmt(r.max)} m</b>
+       · başlangıç kotu ${piFmt(r.pts[0][1])} m · bitiş kotu ${piFmt(r.pts[r.pts.length - 1][1])} m`;
+  ap.disabled = !!r.err;
+  drawPI();
+}
+// Algılanan aralığın dışında uçtaki kot ile devam edilir
+const piY = (P, x) => P.path[piClamp(x, P.x0, P.x1)];
+function buildProfilePts(){
+  const P = PI;
+  if (!P.path) return {err:'Görselde arazi çizgisi bulunamadı. “🎯 Çizgi rengini seç” ile görseldeki çizgiye tıklayın.'};
+  if (P.v1 === null || P.v2 === null) return {err:'Turuncu çizgilerin kotlarını girin (görseldeki kot yazılarına bakın).'};
+  if (Math.abs(P.y1 - P.y2) < 2) return {err:'İki turuncu çizgi birbirinden ayrı olmalı.'};
+  if (P.v1 === P.v2) return {err:'İki turuncu çizginin kotu farklı olmalı.'};
+  if ((P.y1 < P.y2) !== (P.v1 > P.v2)) return {err:'Üstteki turuncu çizginin kotu alttakinden büyük olmalı.'};
+  if (!(P.L > 0)) return {err:'Kesit uzunluğunu girin (görselin altındaki son mesafe değeri, metre cinsinden).'};
+  if (P.xe - P.xs < 5) return {err:'Yeşil başlangıç ve bitiş çizgileri birbirine çok yakın.'};
+  const raw = [];
+  for (let x = P.xs; x <= P.xe; x++){ const y = piY(P, x); if (isFinite(y)) raw.push([x, y]); }
+  if (raw.length < 2) return {err:'Seçilen aralıkta arazi çizgisi yok.'};
+  let lo = Infinity, hi = -Infinity; raw.forEach(p => { lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]); });
+  const simp = rdp(raw, Math.max(0.4, (hi - lo) * PI_DETAIL[P.detail]));
+  const ky = (P.v2 - P.v1) / (P.y2 - P.y1), span = P.xe - P.xs;
+  const pts = [];
+  for (const [x, y] of simp){
+    const d = +((x - P.xs) / span * P.L).toFixed(1), z = +(P.v1 + (y - P.y1) * ky).toFixed(2);
+    if (pts.length && d <= pts[pts.length - 1][0]) continue;
+    pts.push([d, z]);
+  }
+  if (pts.length < 2) return {err:'Profil çok kısa.'};
+  pts[0][0] = 0; pts[pts.length - 1][0] = +(+P.L).toFixed(1);
+  const zs = pts.map(p => p[1]);
+  return {pts, min:Math.min(...zs), max:Math.max(...zs)};
+}
+function drawPI(){
+  const cv = document.getElementById('piCv'), P = PI; if (!cv || !P) return;
+  const g = cv.getContext('2d'), k = P.s * P.dpr, px = 1 / P.s;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
+  g.setTransform(k, 0, 0, k, 0, 0); g.imageSmoothingQuality = 'high'; g.drawImage(P.src, 0, 0);
+  const label = (txt, x, y, col, align = 'left') => {
+    g.font = `600 ${12 * px}px "Segoe UI",system-ui,sans-serif`; g.textBaseline = 'middle';
+    const tw = g.measureText(txt).width, pad = 4 * px, bw = tw + pad * 2, bh = 17 * px;
+    let bx = align === 'right' ? x - bw : x; bx = piClamp(bx, 0, P.w - bw); const by = piClamp(y - bh / 2, 0, P.h - bh);
+    g.fillStyle = col; g.fillRect(bx, by, bw, bh); g.fillStyle = '#fff'; g.textAlign = 'left'; g.fillText(txt, bx + pad, by + bh / 2 + 0.5 * px);
+  };
+  if (P.path){
+    g.fillStyle = 'rgba(255,255,255,.7)';
+    g.fillRect(0, 0, P.xs, P.h); g.fillRect(P.xe + 1, 0, P.w - P.xe - 1, P.h);
+    g.beginPath(); let on = false;
+    for (let x = P.xs; x <= P.xe; x++){ const y = piY(P, x); if (!isFinite(y)){ on = false; continue; } on ? g.lineTo(x + .5, y + .5) : g.moveTo(x + .5, y + .5); on = true; }
+    g.lineJoin = g.lineCap = 'round';
+    g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 5 * px; g.stroke();
+    g.strokeStyle = '#1565c0'; g.lineWidth = 2.2 * px; g.stroke();
+    g.setLineDash([]); g.lineWidth = 2 * px; g.strokeStyle = '#2e7d32';
+    for (const x of [P.xs, P.xe]){ g.beginPath(); g.moveTo(x + .5, 0); g.lineTo(x + .5, P.h); g.stroke(); }
+    label('Başlangıç · 0 m', P.xs + 4 * px, 10 * px, '#2e7d32');
+    label('Bitiş' + (P.L > 0 ? ' · ' + piFmt(P.L) + ' m' : ''), P.xe - 4 * px, 10 * px, '#2e7d32', 'right');
+  }
+  g.lineWidth = 1.6 * px; g.strokeStyle = '#ef6c00'; g.setLineDash([7 * px, 4 * px]);
+  for (const [y, v, n] of [[P.y1, P.v1, 'Üst'], [P.y2, P.v2, 'Alt']]){
+    if (y === null) continue;
+    g.beginPath(); g.moveTo(0, y + .5); g.lineTo(P.w, y + .5); g.stroke();
+    label(`${n}: ${v === null ? 'kot ?' : piFmt(v) + ' m'}`, P.w * 0.5, y + .5, '#ef6c00');
+  }
+  g.setLineDash([]);
+  // Büyüteç: sürüklerken ya da renk seçerken
+  const m = P.drag ? [P.drag.mx ?? P.mouse?.[0], P.drag.my ?? P.mouse?.[1]] : P.pick ? P.mouse : null;
+  if (m && isFinite(m[0]) && isFinite(m[1])){
+    const Z = 4, iw = 190 * px, ih = 120 * px, sw = iw / Z, sh = ih / Z;
+    const ix = m[0] > P.w / 2 ? 6 * px : P.w - iw - 6 * px, iy = 6 * px;
+    const sx = piClamp(m[0] - sw / 2, 0, Math.max(0, P.w - sw)), sy = piClamp(m[1] - sh / 2, 0, Math.max(0, P.h - sh));
+    g.save(); g.imageSmoothingEnabled = false;
+    g.fillStyle = '#fff'; g.fillRect(ix, iy, iw, ih);
+    g.drawImage(P.src, sx, sy, sw, sh, ix, iy, iw, ih);
+    g.beginPath(); g.rect(ix, iy, iw, ih); g.clip();
+    const tx = x => ix + (x - sx) * Z, ty = y => iy + (y - sy) * Z;
+    g.lineWidth = 1.5 * px;
+    if (P.drag && (P.drag.k === 'y1' || P.drag.k === 'y2')){ const y = P[P.drag.k]; g.strokeStyle = '#ef6c00'; g.beginPath(); g.moveTo(ix, ty(y + .5)); g.lineTo(ix + iw, ty(y + .5)); g.stroke(); }
+    else if (P.drag){ const x = P[P.drag.k]; g.strokeStyle = '#2e7d32'; g.beginPath(); g.moveTo(tx(x + .5), iy); g.lineTo(tx(x + .5), iy + ih); g.stroke(); }
+    else { g.strokeStyle = '#ef6c00'; g.beginPath(); g.moveTo(tx(m[0]), iy); g.lineTo(tx(m[0]), iy + ih); g.moveTo(ix, ty(m[1])); g.lineTo(ix + iw, ty(m[1])); g.stroke(); }
+    g.restore();
+    g.strokeStyle = '#334155'; g.lineWidth = 1.5 * px; g.strokeRect(ix, iy, iw, ih);
+  }
+}
+function piPos(e){ const r = e.currentTarget.getBoundingClientRect(); return [(e.clientX - r.left) / PI.s, (e.clientY - r.top) / PI.s]; }
+function piHit(x, y){
+  const P = PI, tol = 8 / P.s; let best = null, bd = tol;
+  const test = (k, d) => { if (d < bd){ bd = d; best = k; } };
+  if (P.y1 !== null) test('y1', Math.abs(y - P.y1));
+  if (P.y2 !== null) test('y2', Math.abs(y - P.y2));
+  if (P.path){ test('xs', Math.abs(x - P.xs)); test('xe', Math.abs(x - P.xe)); }
+  return best;
+}
+function piDown(e){
+  if (!PI) return;
+  const [x, y] = piPos(e);
+  if (PI.pick){ pickLineColor(x, y); return; }
+  const k = piHit(x, y); if (!k) return;
+  PI.drag = {k, mx:x, my:y}; e.currentTarget.setPointerCapture(e.pointerId); e.preventDefault(); drawPI();
+}
+function piMove(e){
+  const P = PI; if (!P) return;
+  const [x, y] = piPos(e); P.mouse = [x, y];
+  if (!P.drag){
+    const k = P.pick ? 'pick' : piHit(x, y);
+    e.currentTarget.style.cursor = k === 'pick' ? 'crosshair' : k === 'y1' || k === 'y2' ? 'ns-resize' : k ? 'ew-resize' : 'default';
+    if (P.pick) drawPI();
+    return;
+  }
+  const k = P.drag.k; P.drag.mx = x; P.drag.my = y;
+  if (k === 'y1' || k === 'y2'){ P[k] = snapGrid(P, piClamp(Math.round(y * 2) / 2, 0, P.h - 1), 4 / P.s); P.touchedY = true; }
+  else if (k === 'xs') P.xs = Math.round(piClamp(x, 0, P.xe - 5));
+  else P.xe = Math.round(piClamp(x, P.xs + 5, P.w - 1));
+  if ((k === 'xs' || k === 'xe') && P.mpp && !P.touchedL) P.L = Math.round(P.mpp * (P.xe - P.xs));
+  updatePI();
+}
+function piUp(){
+  const P = PI; if (!P || !P.drag) return;
+  P.drag = null;
+  if (P.y1 !== null && P.y2 !== null && P.y1 > P.y2){ [P.y1, P.y2] = [P.y2, P.y1]; [P.v1, P.v2] = [P.v2, P.v1]; }
+  updatePI();
+}
+document.getElementById('modal').addEventListener('input', e => {
+  const P = PI; if (!P) return;
+  const el = e.target;
+  if (el.id === 'piV1'){ P.v1 = num(el.value); P.touchedY = true; }
+  else if (el.id === 'piV2'){ P.v2 = num(el.value); P.touchedY = true; }
+  else if (el.id === 'piL'){ P.L = num(el.value); P.touchedL = true; }
+  else if (el.id === 'piDetail') P.detail = el.value;
+  else if (el.id === 'piFit') P.fitAxis = el.checked;
+  else return;
+  updatePI();
+});
+function niceStep(r){
+  const raw = r / 6, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
+  return Math.max(1, (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p);
+}
+function applyProfileImport(){
+  const P = PI; if (!P) return;
+  const r = buildProfilePts(); if (r.err){ alert(r.err); return; }
+  ui.prevTopo = JSON.parse(JSON.stringify({topo:state.topo, axis:state.axis}));
+  state.topo.pts = r.pts; state.topo.length = r.pts[r.pts.length - 1][0];
+  const {top, base} = axisRange();
+  const outside = r.max > top || r.min < base;
+  if (P.fitAxis || outside){
+    const st = niceStep(Math.max(1, r.max - r.min));
+    const nt = Math.ceil((r.max + st * 0.25) / st) * st;
+    const nb = Math.floor((r.min - Math.max(st, (r.max - r.min) * 0.15)) / st) * st;
+    state.axis.left = {...state.axis.left, start:nt, step:st, end:nb};
+    if (!state.axis.right.same) state.axis.right = {...state.axis.right, start:nt, step:st, end:nb};
+  }
+  ui.flatElev = null; ui.tab = 'kesit';
+  PI = null; closeModal(); save(); renderPanel(); scheduleDraw();
+  toast(`Arazi profili aktarıldı: ${r.pts.length} nokta, ${piFmt(state.topo.length)} m` + (!P.fitAxis && outside ? ' (kot cetveli profile göre ayarlandı)' : ''));
+}
+
+document.getElementById('profFile').addEventListener('change', e => {
+  const f = e.target.files[0]; e.target.value = ''; if (f) openProfileImport(f);
+});
+// Ctrl+V ile görsel yapıştırma
+document.addEventListener('paste', e => {
+  const it = [...(e.clipboardData?.items || [])].find(i => i.kind === 'file' && /^image\//.test(i.type));
+  if (!it) return;
+  if (document.getElementById('modal').classList.contains('on') && !PI) return;   // başka bir pencere açık
+  if (document.getElementById('v3d').classList.contains('on')) return;
+  e.preventDefault(); openProfileImport(it.getAsFile());
+});
+// Sürükle-bırak
+window.addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+window.addEventListener('drop', e => {
+  const files = [...(e.dataTransfer?.files || [])]; if (!files.length) return;
+  e.preventDefault();
+  const f = files.find(isImgFile);
+  if (!f){ toast('Arazi profili için bir görsel dosyası (JPG/PNG) bırakın.'); return; }
+  if (document.getElementById('v3d').classList.contains('on')) return;
+  openProfileImport(f);
 });
 
 function fileBase(){ return (state.project.subtitle || state.project.title || 'jeolojik kesit').replace(/[\\/:*?"<>|']/g, '').trim() || 'kesit'; }
@@ -2084,14 +2931,14 @@ function loadSection(data, lib){
   const {usedFormations, usedPatterns, ...rest} = data;
   state = normalize({...rest, formations, customPatterns});
   state._lib = lib || null; state._dirty = false;
-  ui.selBody = null; ui.drag = null; ui.penPath = null; ui.flatElev = null;
+  ui.selBody = null; ui.drag = null; ui.penPath = null; ui.flatElev = null; ui.prevTopo = null;
   imgCache.clear(); swatchCache.clear();
   save(true); renderPanel(); scheduleDraw();
 }
 function blankSection(){
   const lib = state.formations, cp = state.customPatterns;
   state = blankState(lib); state.customPatterns = cp; state._lib = null; state._dirty = false;
-  ui.selBody = null; ui.flatElev = null; ui.tab = 'kesit';
+  ui.selBody = null; ui.flatElev = null; ui.prevTopo = null; ui.tab = 'kesit';
   save(true); renderPanel(); scheduleDraw();
 }
 
@@ -2102,7 +2949,7 @@ function showModal(html, cls = ''){
   m.querySelector('.mbox').className = 'mbox ' + cls;
   m.querySelector('.mbox').innerHTML = html; m.classList.add('on');
 }
-function closeModal(v){ document.getElementById('modal').classList.remove('on'); if (modalResolve){ const r = modalResolve; modalResolve = null; r(v); } }
+function closeModal(v){ PI = null; document.getElementById('modal').classList.remove('on'); if (modalResolve){ const r = modalResolve; modalResolve = null; r(v); } }
 
 // Kaydedilmemiş değişiklik varsa sorar. true: devam edilebilir
 async function guardUnsaved(actionText){
