@@ -208,6 +208,9 @@
       <button class="tool on" id="tEdit" data-action="tool" data-tool="edit" title="Çizgileri ve sınırları sürükleyerek bük">✋ Düzenle</button>
       <button class="tool" id="tPen" data-action="tool" data-tool="pen" title="Elle alan çiz / kırp">✏️ Kalem</button>
       <select id="penFid" disabled style="width:230px" title="Kalemle çizilen alanın birimi"></select>
+      <span style="width:8px"></span>
+      <button class="sm" id="bUndo" data-action="undo" title="Geri al (Ctrl+Z)" disabled>↶ Geri al</button>
+      <button class="sm" id="bRedo" data-action="redo" title="Yinele (Ctrl+Y)" disabled>↷ Yinele</button>
       <span style="width:14px"></span>
       Yakınlaştırma:
       <button class="sm" data-action="zoom" data-z="-1">−</button>
@@ -609,7 +612,7 @@ function load(){
 let saveT;
 // clean=true: değişiklik sayılmaz (kayıt açma/yeni sayfa gibi durumlar)
 function save(clean = false){
-  if (!clean) state._dirty = true;
+  if (!clean){ state._dirty = true; histTouch(); }
   updateDocName();
   clearTimeout(saveT);
   saveT = setTimeout(() => {
@@ -618,6 +621,48 @@ function save(clean = false){
   }, 300);
 }
 const fById = id => state.formations.find(f => f.id === id);
+
+/* ---- Geri al / Yinele (Ctrl+Z, Ctrl+Y) ----
+   Her değişiklik grubundan önceki kesit saklanır. Sürükleme, yazı yazma gibi art arda gelen
+   değişiklikler (aralarında 0,45 sn'den az) tek adım sayılır. */
+const HIST = {undo:[], redo:[], base:null, timer:0, busy:false, max:100};
+const histSnap = () => { const {customPatterns, _lib, _dirty, ...rest} = state; return JSON.stringify(rest); };
+function histReset(){
+  clearTimeout(HIST.timer); HIST.timer = 0;
+  HIST.undo = []; HIST.redo = []; HIST.base = histSnap(); updateUndoButtons();
+}
+function histTouch(){
+  if (HIST.busy) return;
+  clearTimeout(HIST.timer); HIST.timer = setTimeout(histFlush, 450);
+  updateUndoButtons();
+}
+function histFlush(){
+  clearTimeout(HIST.timer); HIST.timer = 0;
+  if (HIST.base === null){ HIST.base = histSnap(); return; }
+  const cur = histSnap(); if (cur === HIST.base) return;
+  HIST.undo.push(HIST.base); if (HIST.undo.length > HIST.max) HIST.undo.shift();
+  HIST.redo = []; HIST.base = cur; updateUndoButtons();
+}
+function histStep(redo){
+  if (ui.drag || ui.penPath) return;
+  histFlush();
+  const from = redo ? HIST.redo : HIST.undo, to = redo ? HIST.undo : HIST.redo;
+  if (!from.length){ toast(redo ? 'Yinelenecek işlem yok' : 'Geri alınacak işlem yok'); return; }
+  to.push(HIST.base);
+  const snap = from.pop(), keep = {customPatterns:state.customPatterns, _lib:state._lib};
+  state = {...JSON.parse(snap), ...keep};
+  HIST.base = snap;
+  ui.drag = null; ui.penPath = null; ui.hover = null; ui.flatElev = null;
+  if (ui.selBody && !state.bodies.some(b => b.id === ui.selBody)) ui.selBody = null;
+  HIST.busy = true; save(); HIST.busy = false;
+  renderPanel(); scheduleDraw(); updateUndoButtons();
+  toast(redo ? '↷ Yinelendi' : '↶ Geri alındı');
+}
+function updateUndoButtons(){
+  const u = document.getElementById('bUndo'), r = document.getElementById('bRedo');
+  if (u) u.disabled = !HIST.undo.length && !HIST.timer;
+  if (r) r.disabled = !HIST.redo.length;
+}
 
 /* =========================================================
    DESEN ÇİZİMİ
@@ -1633,6 +1678,15 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && document.getElementById('modal').classList.contains('on')){ closeModal('cancel'); return; }
   if (e.key === 'Enter' && document.activeElement?.id === 'askName'){ document.querySelector('[data-action="ask"][data-v="save"]')?.click(); return; }
   if (e.key === 'Escape' && document.getElementById('v3d').classList.contains('on')){ close3D(); return; }
+  // Klavye düzeninden bağımsız: harf ya da tuşun fiziksel konumu (KeyZ / KeyY)
+  const kk = e.code === 'KeyZ' ? 'z' : e.code === 'KeyY' ? 'y' : (e.key || '').toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && (kk === 'z' || kk === 'y')){
+    // Yazı kutusunun içindeyken tarayıcının kendi geri alması çalışır
+    const ae = document.activeElement;
+    const typing = ae && (ae.tagName === 'TEXTAREA' || (ae.tagName === 'INPUT' && !/^(checkbox|radio|range|color|button|file)$/.test(ae.type)));
+    if (typing || document.getElementById('modal').classList.contains('on') || document.getElementById('v3d').classList.contains('on')) return;
+    e.preventDefault(); histStep(kk === 'y' || e.shiftKey); return;
+  }
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return;
   if (e.key === 'Escape'){ ui.penPath = null; if (ui.tool === 'pen') setTool('edit'); else selectBody(null); }
   if ((e.key === 'Delete' || e.key === 'Backspace') && ui.selBody){
@@ -2085,6 +2139,8 @@ document.addEventListener('click', e => {
       state.formations.splice(i, 1); break;
     }
     case 'upload': uploadIdx = i; document.getElementById('upl').click(); return;
+    case 'undo': histStep(false); return;
+    case 'redo': histStep(true); return;
     case 'profImg': getOCRWorker().catch(() => {}); document.getElementById('profFile').click(); return;
     case 'profUndo': {
       if (!ui.prevTopo) return;
@@ -3022,13 +3078,13 @@ function loadSection(data, lib){
   state._lib = lib || null; state._dirty = false;
   ui.selBody = null; ui.drag = null; ui.penPath = null; ui.flatElev = null; ui.prevTopo = null;
   imgCache.clear(); swatchCache.clear();
-  save(true); renderPanel(); scheduleDraw();
+  save(true); histReset(); renderPanel(); scheduleDraw();
 }
 function blankSection(){
   const lib = state.formations, cp = state.customPatterns;
   state = blankState(lib); state.customPatterns = cp; state._lib = null; state._dirty = false;
   ui.selBody = null; ui.flatElev = null; ui.prevTopo = null; ui.tab = 'kesit';
-  save(true); renderPanel(); scheduleDraw();
+  save(true); histReset(); renderPanel(); scheduleDraw();
 }
 
 /* ---- Pencereler ---- */
@@ -3344,6 +3400,7 @@ state = load();
 // Eski sürümden gelen, hiç kaydedilmemiş ve içerik barındıran kesit "kaydedilmemiş" sayılır
 if (state._dirty === undefined) state._dirty = !state._lib && (state.bodies.length > 0 || state.boreholes.length > 0 || state.topo.pts.length > 2);
 updateDocName();
+histReset();
 document.getElementById('modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') closeModal('cancel'); });
 document.addEventListener('input', e => {
   if (e.target.id !== 'libSearch') return;
