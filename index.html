@@ -1719,12 +1719,21 @@ function endPointer(){
 }
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointercancel', endPointer);
-// Sağ tık: seçili birimin düzenleme kutucuklarını kapatır (tarayıcı menüsü açılmaz)
+// Sağ tık: tıklanan düzenleme noktasını (kutucuğu) siler, diğer noktalar kalır; tarayıcı menüsü açılmaz
 cv.addEventListener('contextmenu', e => {
   e.preventDefault();
-  if (ui.drag || ui.penPath) return;
-  ui.hover = null; cv.style.cursor = 'default';
-  if (ui.selBody) selectBody(null); else scheduleDraw();
+  if (ui.drag || ui.penPath || ui.tool === 'pen' || !LAY) return;
+  const [lx, ly] = toLogical(e), h = hitTest(lx, ly);
+  if (!h) return;
+  if (h.kind === 'topoPt'){
+    sortTopo(); const i = nearestPt(state.topo.pts, lx, ly);
+    if (i <= 0 || i === state.topo.pts.length - 1) return;   // baş ve son nokta silinmez
+    state.topo.pts.splice(i, 1);
+  } else if (h.kind === 'bodyPt'){
+    const b = selBodyObj(); if (!b || b.pts.length <= 3) return;   // birim en az 3 köşeli kalır
+    b.pts.splice(h.i, 1);
+  } else return;
+  ui.hover = null; cv.style.cursor = 'default'; save(); scheduleDraw(); schedulePanel();
 });
 cv.addEventListener('dblclick', e => {
   if (ui.tool === 'pen' || !LAY) return;
@@ -1899,7 +1908,7 @@ function panelSection(){
 
     <h3>3. Arazi profili</h3>
     <p class="hint">Kesitteki çizgiyi fareyle tutup sürükleyerek bükün. Çizginin <b>herhangi bir yerine</b> tıklayıp çekince yeni bir bükülme noktası oluşur.
-    Bir noktaya <b>çift tıklayınca</b> nokta silinir. Mavi uç noktalar yalnızca yukarı ve aşağı hareket eder.</p>
+    Bir noktaya <b>sağ tıklayınca</b> (veya çift tıklayınca) o nokta silinir. Mavi uç noktalar yalnızca yukarı ve aşağı hareket eder.</p>
     <div class="pimp">
       <button class="add" data-action="profImg">🖼️ Görselden profil aktar</button>
       <span class="hint">Google Earth vb. yükseklik profili görselini seçin, sürükleyip bırakın ya da <b>Ctrl+V</b> ile yapıştırın.</span>
@@ -1926,7 +1935,7 @@ function panelSection(){
     <p class="hint">Her birim için yüzeyde başladığı ve bittiği mesafeyi girin. Sınır eğimliyse, sınırın <b>tabanda</b> ulaştığı mesafeyi de yazın.
     Boş bırakılan başlangıç veya bitiş kesit kenarı kabul edilir. Listede alttaki birim üstte çizilir.</p>
     <p class="hint"><b>Bükmek için:</b> kesitte bir formasyon sınırını tutup sürükleyin. Birim serbest şekle döner ve turuncu köşe noktaları çıkar.
-    Sınırın herhangi bir yerinden çekince yeni köşe eklenir, köşeye çift tıklayınca silinir.<br>
+    Sınırın herhangi bir yerinden çekince yeni köşe eklenir, köşeye <b>sağ tıklayınca</b> (veya çift tıklayınca) silinir.<br>
     <b>✏️ Kalem:</b> üstteki kalem düğmesine basıp kesit üzerinde basılı tutarak bir alan çizin. Alan, seçtiğiniz birimle dolar.
     "✂ Kırp" seçilirse ana birim, "Boş" seçilirse beyaz alan görünür. Böylece birimleri birbirine geçişli (kama veya dil şeklinde) gösterebilirsiniz.</p>`;
   state.bodies.forEach((b, i) => {
