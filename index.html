@@ -1253,16 +1253,29 @@ function draw(canvas, s, edit = false){
   ctx.font = FT(20, 'axis'); ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
   // Formasyon sınırlarının cetvele denk gelen kotları (kırmızı); çakışan normal etiketler gizlenir
   const BK = S.showBodyKot !== false ? bodyKots(m) : {L:[], R:[]};
-  const clash = (list, el) => list.some(k => Math.abs(Y(k) - Y(el)) < 22 * ta);
+  const lh = 22 * ta;   // bir kot yazısının yüksekliği
+  const clash = (list, el) => list.some(k => Math.abs(Y(k) - Y(el)) < lh);
+  // Yazılacak kotlar: ilk ve son her zaman; aradakiler bir öncekine ve sona yeterince uzaksa
+  const fitLabels = ticks => {
+    const t = ticks.filter(inRange); if (t.length < 3) return new Set(t);
+    const keep = new Set([t[0], t[t.length - 1]]), yEnd = Y(t[t.length - 1]);
+    let last = Y(t[0]);
+    for (let i = 1; i < t.length - 1; i++){
+      const y = Y(t[i]);
+      if (Math.abs(y - last) >= lh * 1.1 && Math.abs(yEnd - y) >= lh * 1.1){ keep.add(t[i]); last = y; }
+    }
+    return keep;
+  };
+  const showL = fitLabels(leftTicks), showR = AX.right.same ? showL : fitLabels(rightTicks);
   for (const el of leftTicks.filter(inRange)){
     const y = Y(el);
     ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ml - 10, y); ctx.lineTo(ml, y); ctx.stroke();
-    if (!clash(BK.L, el)){ ctx.textAlign = 'right'; ctx.fillText(fmtE(el), ml - 16, y); }
+    if (showL.has(el) && !clash(BK.L, el)){ ctx.textAlign = 'right'; ctx.fillText(fmtE(el), ml - 16, y); }
   }
   for (const el of rightTicks.filter(inRange)){
     const y = Y(el);
     ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ml + plotW, y); ctx.lineTo(ml + plotW + 10, y); ctx.stroke();
-    ctx.textAlign = 'left'; ctx.fillText(fmtE(el), ml + plotW + 16, y);
+    if (showR.has(el)){ ctx.textAlign = 'left'; ctx.fillText(fmtE(el), ml + plotW + 16, y); }
   }
   ctx.font = FT(24, 'axis');
   const kotOff = ml - 42;
@@ -1271,13 +1284,16 @@ function draw(canvas, s, edit = false){
 
   const len = m.xmax - m.xmin;
   const useKm = S.unit === 'km' || (S.unit === 'auto' && len >= 1000);
-  const hstep = niceStep(len / 12);
   const fmtX = d => useKm ? (+(d / 1000).toFixed(3)).toString() : (+d.toFixed(1)).toString();
   ctx.font = FT(21, 'axis'); ctx.textBaseline = 'top';
+  let hstep = niceStep(len / 12);
+  const widest = st => { let wMax = 0; for (let d = 0; d <= len + 1e-9; d += st) wMax = Math.max(wMax, ctx.measureText(fmtX(d)).width); return wMax; };
+  for (let g = 0; g < 12 && widest(hstep) + 14 * ta > hstep * hpx; g++) hstep = niceStep(hstep * 1.6);
+  const endW = ctx.measureText(fmtX(len) + (useKm ? ' km' : ' m')).width;
   for (let d = 0; d <= len + 1e-9; d += hstep){
     const x = X(m.xmin + d);
     ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, mt + plotH); ctx.lineTo(x, mt + plotH + 10); ctx.stroke();
-    if (len - d > hstep * 0.45){ ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.fillText(fmtX(d), x, mt + plotH + 18); }
+    if (X(m.xmax) - x > (ctx.measureText(fmtX(d)).width + endW) / 2 + 10 * ta){ ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.fillText(fmtX(d), x, mt + plotH + 18); }
   }
   ctx.fillStyle = '#d62020'; ctx.textAlign = 'center';
   ctx.fillText(fmtX(len) + (useKm ? ' km' : ' m'), ml + plotW, mt + plotH + 18);
@@ -1826,6 +1842,8 @@ function panelSection(){
       ${fld('Bitiş (alt)', 'axis.right.end', AX.right.end, {type:'number'})}
     </div>`}
     ${chk('Ara değerleri adımın katlarına yuvarla (ör. 962, 955, 950 … 920, 917)', 'axis.round', AX.round)}
+    ${scaleCtl('text.axis', state.text.axis, '🔤 Cetvel yazı boyutu', 0.5, 3)}
+    <p class="hint" style="margin:4px 0 0">Kot ve uzaklık cetvellerindeki yazıların boyutu. Sığmayan ara değerler üst üste binmemesi için kendiliğinden atlanır.</p>
 
     <h3>3. Arazi profili</h3>
     <p class="hint">Kesitteki çizgiyi fareyle tutup sürükleyerek bükün. Çizginin <b>herhangi bir yerine</b> tıklayıp çekince yeni bir bükülme noktası oluşur.
@@ -2930,7 +2948,7 @@ document.getElementById('modal').addEventListener('input', e => {
   else return;
   updatePI();
 });
-function niceStep(r){
+function profNiceStep(r){
   const raw = r / 6, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
   return Math.max(1, (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p);
 }
@@ -2948,7 +2966,7 @@ function showPIError(msg){
 // ara değerler görseldeki cetvelin adımıyla düz sayılardır (ör. 1528, 1520, 1510 … 1420, 1410)
 function profileRuler(r){
   const R = PI && PI.ruler || {};
-  const st = R.step > 0 ? R.step : niceStep(Math.max(1, r.max - r.min));
+  const st = R.step > 0 ? R.step : profNiceStep(Math.max(1, r.max - r.min));
   let top = Math.ceil(r.max - 1e-9), bot = Math.floor(r.min + 1e-9);
   if (R.top !== null && R.top !== undefined && R.top >= r.max - 2 && R.top <= r.max + st) top = Math.max(top, R.top);
   if (R.bot !== null && R.bot !== undefined && R.bot <= r.min + 2 && R.bot >= r.min - st) bot = Math.min(bot, R.bot);
