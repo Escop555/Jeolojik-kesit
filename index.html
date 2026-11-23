@@ -542,7 +542,7 @@ function blankState(formations){
     customPatterns:{},
     axis:{left:{start:1000, step:10, end:900}, right:{same:true, start:1000, step:10, end:900}, round:true},
     topo:{length:1000, smooth:true, pts:[[0, 965], [1000, 965]]},
-    text:{title:1, axis:1, code:1, bh:1, masw:1, mikro:1, fault:1},
+    text:{title:1, axis:1, axisY:1, axisX:1, code:1, bh:1, masw:1, mikro:1, fault:1},
     legend:{pos:'alt', scale:1, width:680, title:false, border:true,
             items:{ground:true, contact:true, bh:true, masw:true, mikro:true, gwl:true, fault:true}},
     bg:'f-jks', bgScale:1, bodies:[], boreholes:[], masw:[], mikro:[], faults:[]
@@ -599,6 +599,11 @@ function normalize(st){
   out.axis.right = {...b.axis.right, ...(out.axis.right || {})};
   out.topo = {...b.topo, ...(out.topo || {})};
   out.text = {...b.text, ...(st.text || {})};
+  // Eski sürüm: tek "eksen yazıları" ayarı vardı → kot ve uzaklık cetveline ayrı ayrı aktarılır
+  if (st.text && st.text.axis != null){
+    if (st.text.axisY == null) out.text.axisY = st.text.axis;
+    if (st.text.axisX == null) out.text.axisX = st.text.axis;
+  }
   out.legend = {...b.legend, ...(st.legend || {}), items:{...b.legend.items, ...((st.legend || {}).items || {})}};
   if (!Array.isArray(out.topo.pts) || out.topo.pts.length < 2) out.topo.pts = [[0, 965], [out.topo.length || 1000, 965]];
   delete out.topoText; delete out.topoUnit;
@@ -1139,9 +1144,9 @@ function draw(canvas, s, edit = false){
   }
   const TS = k => Math.min(5, Math.max(0.3, num(state.text?.[k]) || 1));
   const FT = (px, k, st = 'bold') => `${st} ${Math.round(px * TS(k))}px Arial`;
-  const ta = TS('axis'), tt = TS('title');
+  const tY = TS('axisY'), tX = TS('axisX'), tt = TS('title');   // kot cetveli, uzaklık cetveli, başlık
   const LG = state.legend || {}, LS = Math.min(3, Math.max(0.4, num(LG.scale) || 1)), right = LG.pos === 'sag';
-  const ml = Math.round(100 + 50 * ta), mr = ml, mt = Math.round(120 + 110 * tt);
+  const ml = Math.round(100 + 50 * tY), mr = ml, mt = Math.round(120 + 110 * tt);
   const RW = right ? Math.max(300, num(LG.width) || 680) : 0;
   const CW = W + RW;
   const plotW = W - ml - mr;
@@ -1179,7 +1184,7 @@ function draw(canvas, s, edit = false){
   if (state.mikro.some(x => num(x.ch) !== null) && LI.mikro !== false) sym.push('mikro');
   if (m.bhs.some(b => b.gwl !== null) && LI.gwl !== false) sym.push('gwl');
   if (state.faults.some(x => num(x.ch) !== null) && LI.fault !== false) sym.push('fault');
-  const plotBottom = mt + plotH + Math.round(70 + 45 * ta);   // eksen yazılarının altı
+  const plotBottom = mt + plotH + Math.round(70 + 45 * tX);   // eksen yazılarının altı
   const pad = 30;
   const legX = right ? W - 20 : ml - 60;
   const legW = right ? RW - 30 : CW - legX * 2;
@@ -1250,10 +1255,10 @@ function draw(canvas, s, edit = false){
   const inRange = el => el <= m.top + 1e-6 && el >= m.base - 1e-6;
   ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(ml, mt - 10); ctx.lineTo(ml, mt + plotH); ctx.lineTo(ml + plotW, mt + plotH); ctx.lineTo(ml + plotW, mt - 10); ctx.stroke();
-  ctx.font = FT(20, 'axis'); ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
+  ctx.font = FT(20, 'axisY'); ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
   // Formasyon sınırlarının cetvele denk gelen kotları (kırmızı); çakışan normal etiketler gizlenir
   const BK = S.showBodyKot !== false ? bodyKots(m) : {L:[], R:[]};
-  const lh = 22 * ta;   // bir kot yazısının yüksekliği
+  const lh = 22 * tY;   // bir kot yazısının yüksekliği
   const clash = (list, el) => list.some(k => Math.abs(Y(k) - Y(el)) < lh);
   // Yazılacak kotlar: ilk ve son her zaman; aradakiler bir öncekine ve sona yeterince uzaksa
   const fitLabels = ticks => {
@@ -1277,7 +1282,7 @@ function draw(canvas, s, edit = false){
     ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ml + plotW, y); ctx.lineTo(ml + plotW + 10, y); ctx.stroke();
     if (showR.has(el)){ ctx.textAlign = 'left'; ctx.fillText(fmtE(el), ml + plotW + 16, y); }
   }
-  ctx.font = FT(24, 'axis');
+  ctx.font = FT(24, 'axisY');
   const kotOff = ml - 42;
   ctx.save(); ctx.translate(ml - kotOff, mt + plotH/2); ctx.rotate(-Math.PI/2); ctx.textAlign = 'center'; ctx.fillText('Kot (m)', 0, 0); ctx.restore();
   ctx.save(); ctx.translate(ml + plotW + kotOff, mt + plotH/2); ctx.rotate(Math.PI/2); ctx.textAlign = 'center'; ctx.fillText('Kot (m)', 0, 0); ctx.restore();
@@ -1285,20 +1290,20 @@ function draw(canvas, s, edit = false){
   const len = m.xmax - m.xmin;
   const useKm = S.unit === 'km' || (S.unit === 'auto' && len >= 1000);
   const fmtX = d => useKm ? (+(d / 1000).toFixed(3)).toString() : (+d.toFixed(1)).toString();
-  ctx.font = FT(21, 'axis'); ctx.textBaseline = 'top';
+  ctx.font = FT(21, 'axisX'); ctx.textBaseline = 'top';
   let hstep = niceStep(len / 12);
   const widest = st => { let wMax = 0; for (let d = 0; d <= len + 1e-9; d += st) wMax = Math.max(wMax, ctx.measureText(fmtX(d)).width); return wMax; };
-  for (let g = 0; g < 12 && widest(hstep) + 14 * ta > hstep * hpx; g++) hstep = niceStep(hstep * 1.6);
+  for (let g = 0; g < 12 && widest(hstep) + 14 * tX > hstep * hpx; g++) hstep = niceStep(hstep * 1.6);
   const endW = ctx.measureText(fmtX(len) + (useKm ? ' km' : ' m')).width;
   for (let d = 0; d <= len + 1e-9; d += hstep){
     const x = X(m.xmin + d);
     ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, mt + plotH); ctx.lineTo(x, mt + plotH + 10); ctx.stroke();
-    if (X(m.xmax) - x > (ctx.measureText(fmtX(d)).width + endW) / 2 + 10 * ta){ ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.fillText(fmtX(d), x, mt + plotH + 18); }
+    if (X(m.xmax) - x > (ctx.measureText(fmtX(d)).width + endW) / 2 + 10 * tX){ ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.fillText(fmtX(d), x, mt + plotH + 18); }
   }
   ctx.fillStyle = '#d62020'; ctx.textAlign = 'center';
   ctx.fillText(fmtX(len) + (useKm ? ' km' : ' m'), ml + plotW, mt + plotH + 18);
-  ctx.fillStyle = '#000'; ctx.font = FT(26, 'axis');
-  ctx.fillText(`Uzaklık (${useKm ? 'km' : 'm'})`, ml + plotW/2, mt + plotH + 26 + 36 * ta);
+  ctx.fillStyle = '#000'; ctx.font = FT(26, 'axisX');
+  ctx.fillText(`Uzaklık (${useKm ? 'km' : 'm'})`, ml + plotW/2, mt + plotH + 26 + 36 * tX);
 
   /* ---- Formasyonlar ---- */
   const gxs = m.gxs;
@@ -1338,14 +1343,14 @@ function draw(canvas, s, edit = false){
   // Formasyon sınır kotları cetvellerde (kırmızı). Etiketler her iki cetvelin hemen solunda.
   if (BK.L.length || BK.R.length){
     const C = '#c62828';
-    ctx.save(); ctx.font = FT(20, 'axis'); ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
+    ctx.save(); ctx.font = FT(20, 'axisY'); ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
     for (const el of BK.L){
       const y = Y(el);
       ctx.strokeStyle = C; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ml - 12, y); ctx.lineTo(ml + 10, y); ctx.stroke();
       ctx.fillStyle = C; ctx.fillText(fmtE(el), ml - 16, y);
     }
     for (const el of BK.R){
-      const y = Y(el), t = fmtE(el), w = ctx.measureText(t).width, h = 22 * ta;
+      const y = Y(el), t = fmtE(el), w = ctx.measureText(t).width, h = 22 * tY;
       ctx.strokeStyle = C; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ml + plotW - 10, y); ctx.lineTo(ml + plotW + 12, y); ctx.stroke();
       ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fillRect(ml + plotW - 16 - w - 4, y - h / 2, w + 8, h);
       ctx.fillStyle = C; ctx.fillText(t, ml + plotW - 16, y);
@@ -1842,8 +1847,9 @@ function panelSection(){
       ${fld('Bitiş (alt)', 'axis.right.end', AX.right.end, {type:'number'})}
     </div>`}
     ${chk('Ara değerleri adımın katlarına yuvarla (ör. 962, 955, 950 … 920, 917)', 'axis.round', AX.round)}
-    ${scaleCtl('text.axis', state.text.axis, '🔤 Cetvel yazı boyutu', 0.5, 3)}
-    <p class="hint" style="margin:4px 0 0">Kot ve uzaklık cetvellerindeki yazıların boyutu. Sığmayan ara değerler üst üste binmemesi için kendiliğinden atlanır.</p>
+    <div style="margin-top:8px">${scaleCtl('text.axisY', state.text.axisY, '🔤 Kot cetveli (sol/sağ)', 0.5, 3)}</div>
+    ${scaleCtl('text.axisX', state.text.axisX, '🔤 Uzaklık cetveli (alt)', 0.5, 3)}
+    <p class="hint" style="margin:4px 0 0">İki cetvelin yazı boyutu ayrı ayrı ayarlanır. Sığmayan ara değerler üst üste binmemesi için kendiliğinden atlanır.</p>
 
     <h3>3. Arazi profili</h3>
     <p class="hint">Kesitteki çizgiyi fareyle tutup sürükleyerek bükün. Çizginin <b>herhangi bir yerine</b> tıklayıp çekince yeni bir bükülme noktası oluşur.
@@ -2046,7 +2052,8 @@ function panelSettings(){
     <h3>Yazı boyutları</h3>
     <p class="hint">Sondaj, MASW, mikrotremör ve fay yazıları "Sondaj & Ölçüm" sekmesinden ayrıca ayarlanır.</p>
     ${scaleCtl('text.title', state.text.title, 'Başlık', 0.5, 3)}
-    ${scaleCtl('text.axis', state.text.axis, 'Eksen yazıları', 0.5, 3)}
+    ${scaleCtl('text.axisY', state.text.axisY, 'Kot cetveli (sol/sağ)', 0.5, 3)}
+    ${scaleCtl('text.axisX', state.text.axisX, 'Uzaklık cetveli (alt)', 0.5, 3)}
     ${scaleCtl('text.code', state.text.code, 'Formasyon kodları', 0.5, 4)}
     <h3>PNG çıktısı</h3>
     <label>Çözünürlük${sel('settings.exportScale', [[2,'Orta (~4800 px)'],[3,'Yüksek (~7200 px)'],[4,'Çok yüksek (~9600 px)']], S.exportScale, false)}</label>`;
