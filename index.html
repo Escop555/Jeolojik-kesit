@@ -1719,6 +1719,13 @@ function endPointer(){
 }
 cv.addEventListener('pointerup', endPointer);
 cv.addEventListener('pointercancel', endPointer);
+// Sağ tık: seçili birimin düzenleme kutucuklarını kapatır (tarayıcı menüsü açılmaz)
+cv.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (ui.drag || ui.penPath) return;
+  ui.hover = null; cv.style.cursor = 'default';
+  if (ui.selBody) selectBody(null); else scheduleDraw();
+});
 cv.addEventListener('dblclick', e => {
   if (ui.tool === 'pen' || !LAY) return;
   const [lx, ly] = toLogical(e), h = hitTest(lx, ly);
