@@ -135,6 +135,9 @@
   .piinfo{font-size:12.5px;color:#334155;padding:9px 11px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;margin-top:10px}
   .piinfo.err{background:#fff4ee;border-color:#f3d3c4;color:var(--danger)}
   button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  input.bad{border-color:var(--danger);box-shadow:0 0 0 3px rgba(194,65,12,.18)}
+  .piinfo.shake{animation:piShake .4s}
+  @keyframes piShake{20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
   button.on-pick{background:#fff4e5;border-color:#ef6c00;color:#7c2d12;font-weight:600}
   .mbox .mh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   .mbox .mh b{font-size:16px}
@@ -2082,7 +2085,7 @@ document.addEventListener('click', e => {
       state.formations.splice(i, 1); break;
     }
     case 'upload': uploadIdx = i; document.getElementById('upl').click(); return;
-    case 'profImg': document.getElementById('profFile').click(); return;
+    case 'profImg': getOCRWorker().catch(() => {}); document.getElementById('profFile').click(); return;
     case 'profUndo': {
       if (!ui.prevTopo) return;
       state.topo = ui.prevTopo.topo; state.axis = ui.prevTopo.axis; ui.prevTopo = null; ui.flatElev = null;
@@ -2182,8 +2185,9 @@ async function openProfileImport(file){
   const g = c.getContext('2d', {willReadFrequently:true});
   g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(im, 0, 0, w, h);
   const data = g.getImageData(0, 0, w, h).data;
-  const auto = guessLineColor(data, w, h);
-  PI = {id:uid(), name:file.name || 'Yapıştırılan görsel', src:c, w, h, data, color:auto, autoColor:auto,
+  const DR = findDarkRows(data, w, h), darkBg = DR.reduce((a, b) => a + b, 0) > h * 0.5;
+  const auto = guessLineColor(data, w, h, DR, darkBg);
+  PI = {DR, darkBg, id:uid(), name:file.name || 'Yapıştırılan görsel', src:c, w, h, data, color:auto, autoColor:auto,
         path:null, x0:0, x1:w - 1, xs:0, xe:w - 1, y1:null, y2:null, v1:null, v2:null, L:null, mpp:null,
         detail:'orta', fitAxis:true, pick:false, touchedY:false, touchedL:false, grid:[], ocr:'run', drag:null, mouse:null};
   detectProfile(PI);
@@ -2193,16 +2197,30 @@ async function openProfileImport(file){
 }
 
 // Görselde en çok bulunan koyu ve renkli ton = profil çizgisi. Renkli ton yoksa koyu (siyah) çizgi aranır.
-function guessLineColor(d, w, h){
+// Zemini siyah/koyu olan satırlar (ör. alttaki koyu mesafe bandı). Bunlar çizgi aranırken yok sayılır.
+function findDarkRows(d, w, h){
+  const out = new Uint8Array(h), sx = Math.max(1, Math.floor(w / 300));
+  for (let y = 0; y < h; y++){
+    const v = [];
+    for (let x = 0; x < w; x += sx){ const i = (y * w + x) * 4; v.push(0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]); }
+    v.sort((a, b) => a - b); out[y] = v[v.length >> 1] < 80 ? 1 : 0;
+  }
+  return out;
+}
+// darkBg: görselin büyük kısmı koyu zeminli (koyu temalı grafik) → açık renkli çizgi aranır
+function guessLineColor(d, w, h, DR, darkBg){
   const step = Math.max(1, Math.floor(Math.sqrt(w * h / 600000)));
   const bins = new Map(), dark = [0, 0, 0, 0];
-  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step){
-    const i = (y * w + x) * 4, r = d[i], g = d[i+1], b = d[i+2];
-    const lum = 0.299 * r + 0.587 * g + 0.114 * b, ch = Math.max(r, g, b) - Math.min(r, g, b);
-    if (lum < 175 && ch > 60){
-      const key = (r >> 4) * 256 + (g >> 4) * 16 + (b >> 4), e = bins.get(key);
-      if (e){ e[0]++; e[1] += r; e[2] += g; e[3] += b; } else bins.set(key, [1, r, g, b]);
-    } else if (lum < 90){ dark[0]++; dark[1] += r; dark[2] += g; dark[3] += b; }
+  for (let y = 0; y < h; y += step){
+    if (!darkBg && DR[y]) continue;
+    for (let x = 0; x < w; x += step){
+      const i = (y * w + x) * 4, r = d[i], g = d[i+1], b = d[i+2];
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b, ch = Math.max(r, g, b) - Math.min(r, g, b);
+      if (darkBg ? (lum >= 90 && ch > 60) : (lum < 175 && ch > 60)){
+        const key = (r >> 4) * 256 + (g >> 4) * 16 + (b >> 4), e = bins.get(key);
+        if (e){ e[0]++; e[1] += r; e[2] += g; e[3] += b; } else bins.set(key, [1, r, g, b]);
+      } else if (darkBg ? lum > 170 : lum < 90){ dark[0]++; dark[1] += r; dark[2] += g; dark[3] += b; }
+    }
   }
   const around = key => {
     const r = key >> 8, g = (key >> 4) & 15, b = key & 15, s = [0, 0, 0, 0];
@@ -2219,8 +2237,8 @@ function guessLineColor(d, w, h){
     const s = around(bestK);
     return {r:s[1] / s[0], g:s[2] / s[0], b:s[3] / s[0], dark:false};
   }
-  if (dark[0]) return {r:dark[1] / dark[0], g:dark[2] / dark[0], b:dark[3] / dark[0], dark:true};
-  return {r:0, g:0, b:0, dark:true};
+  if (dark[0]) return {r:dark[1] / dark[0], g:dark[2] / dark[0], b:dark[3] / dark[0], dark:!darkBg};
+  return darkBg ? {r:255, g:255, b:255, dark:false} : {r:0, g:0, b:0, dark:true};
 }
 
 function detectProfile(P){
@@ -2228,6 +2246,7 @@ function detectProfile(P){
   const tol = C.dark ? 95 : 85, tol2 = tol * tol;
   const M = new Uint8Array(w * h), rowN = new Int32Array(h), colN = new Int32Array(w);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){
+    if (!P.darkBg && P.DR[y]) continue;
     const i = (y * w + x) * 4, dr = d[i] - C.r, dg = d[i+1] - C.g, db = d[i+2] - C.b;
     if (dr * dr + dg * dg + db * db < tol2){ M[y * w + x] = 1; rowN[y]++; colN[x]++; }
   }
@@ -2404,15 +2423,23 @@ function redetectProfile(){
   setPIStatus(); updatePI();
 }
 function pickLineColor(x, y){
-  const P = PI; let best = null, bl = Infinity;
-  for (let yy = Math.round(y) - 3; yy <= Math.round(y) + 3; yy++) for (let xx = Math.round(x) - 3; xx <= Math.round(x) + 3; xx++){
+  const P = PI, X = Math.round(x), Y = Math.round(y), d = P.data;
+  const ch = [[], [], []];
+  for (let yy = Y - 6; yy <= Y + 6; yy++) for (let xx = X - 6; xx <= X + 6; xx++){
     if (xx < 0 || yy < 0 || xx >= P.w || yy >= P.h) continue;
-    const i = (yy * P.w + xx) * 4, l = 0.299 * P.data[i] + 0.587 * P.data[i+1] + 0.114 * P.data[i+2];
-    if (l < bl){ bl = l; best = i; }
+    const i = (yy * P.w + xx) * 4; ch[0].push(d[i]); ch[1].push(d[i+1]); ch[2].push(d[i+2]);
+  }
+  if (!ch[0].length) return;
+  const bg = ch.map(a => a.sort((p, q) => p - q)[a.length >> 1]);
+  let best = null, bd = -1;
+  for (let yy = Y - 3; yy <= Y + 3; yy++) for (let xx = X - 3; xx <= X + 3; xx++){
+    if (xx < 0 || yy < 0 || xx >= P.w || yy >= P.h) continue;
+    const i = (yy * P.w + xx) * 4, dd = (d[i] - bg[0]) ** 2 + (d[i+1] - bg[1]) ** 2 + (d[i+2] - bg[2]) ** 2;
+    if (dd > bd){ bd = dd; best = i; }
   }
   if (best === null) return;
   const r = P.data[best], g = P.data[best+1], b = P.data[best+2];
-  P.color = {r, g, b, dark:Math.max(r, g, b) - Math.min(r, g, b) < 40};
+  P.color = {r, g, b, dark:Math.max(r, g, b) - Math.min(r, g, b) < 40 && 0.299 * r + 0.587 * g + 0.114 * b < 110};
   P.pick = false; redetectProfile();
 }
 
@@ -2480,7 +2507,12 @@ async function runProfileOCR(P){
     if (PI !== P) return;
     P.ocr = 'fail';
   }
-  if (PI === P){ setPIStatus(); updatePI(); }
+  if (PI === P){
+    setPIStatus();
+    const auto = P.autoApply; P.autoApply = false;
+    updatePI();
+    if (auto) applyProfileImport();   // okuma sürerken "aktar"a basılmıştı
+  }
 }
 // Okunan kelimelerden sayılar. Küçük yazılarda ondalık nokta sık kaçtığı için (3.62 → 362)
 // km ve birimsiz sayılarda noktalı okunuşlar da aday olarak tutulur; doğru olanı ölçek uyumu seçer.
@@ -2676,11 +2708,15 @@ function updatePI(){
   setV('piV1', P.v1); setV('piV2', P.v2); setV('piL', P.L);
   const sw = document.getElementById('piSw'); if (sw) sw.style.background = `rgb(${P.color.r | 0},${P.color.g | 0},${P.color.b | 0})`;
   const r = buildProfilePts(), info = document.getElementById('piInfo'), ap = document.getElementById('piApply');
-  info.className = 'piinfo' + (r.err ? ' err' : '');
-  info.innerHTML = r.err ? '⚠ ' + r.err
+  const waiting = r.err && P.ocr === 'run' && P.path && (P.v1 === null || P.v2 === null || !(P.L > 0));
+  info.className = 'piinfo' + (r.err && !waiting ? ' err' : '');
+  info.innerHTML = waiting ? '⏳ Kotlar ve kesit uzunluğu görseldeki yazılardan okunuyor… İsterseniz beklemeden kendiniz girebilirsiniz.'
+    : r.err ? '⚠ ' + r.err
     : `✔ Aktarılacak profil: <b>${r.pts.length}</b> nokta · uzunluk <b>${piFmt(P.L)} m</b> · en düşük kot <b>${piFmt(r.min)} m</b> · en yüksek kot <b>${piFmt(r.max)} m</b>
        · başlangıç kotu ${piFmt(r.pts[0][1])} m · bitiş kotu ${piFmt(r.pts[r.pts.length - 1][1])} m`;
-  ap.disabled = !!r.err;
+  ap.disabled = false;
+  ap.innerHTML = P.autoApply ? '⏳ Yazılar okunuyor… bitince aktarılacak' : '✔ Profili kesite aktar';
+  ['piV1', 'piV2', 'piL'].forEach(id => { const el = document.getElementById(id); if (el && el.value !== '') el.classList.remove('bad'); });
   drawPI();
 }
 // Algılanan aralığın dışında uçtaki kot ile devam edilir
@@ -2814,9 +2850,24 @@ function niceStep(r){
   const raw = r / 6, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
   return Math.max(1, (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p);
 }
+// Eksik/hatalı değeri açıkça gösterir: mesaj, kırmızı kutu, imleç o kutuya
+function showPIError(msg){
+  const P = PI; if (!P) return;
+  updatePI();
+  const info = document.getElementById('piInfo');
+  if (info){ info.classList.remove('shake'); void info.offsetWidth; info.classList.add('shake'); }
+  const miss = P.v1 === null ? 'piV1' : P.v2 === null ? 'piV2' : !(P.L > 0) ? 'piL' : null;
+  if (miss){ const el = document.getElementById(miss); el.classList.add('bad'); el.focus(); }
+  toast(msg);
+}
 function applyProfileImport(){
   const P = PI; if (!P) return;
-  const r = buildProfilePts(); if (r.err){ alert(r.err); return; }
+  const r = buildProfilePts();
+  if (r.err){
+    // Yazılar hâlâ okunuyorsa okuma bitince kendiliğinden aktarılır
+    if (P.ocr === 'run' && P.path){ P.autoApply = true; updatePI(); return; }
+    showPIError(r.err); return;
+  }
   ui.prevTopo = JSON.parse(JSON.stringify({topo:state.topo, axis:state.axis}));
   state.topo.pts = r.pts; state.topo.length = r.pts[r.pts.length - 1][0];
   const {top, base} = axisRange();
