@@ -127,6 +127,8 @@
   .pimp .hint{margin:0;font-size:11.5px}
   .piwrap{background:#f1f5f9;border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;justify-content:center}
   #piCv{display:block;touch-action:none}
+  .pizrow{display:flex;gap:6px;align-items:center}
+  .piz{width:96px;height:32px;flex:none;border:1px solid var(--line2);border-radius:6px;background:#fff;image-rendering:auto}
   .pistat{font-size:12.5px;padding:8px 11px;border-radius:8px;background:#f4f7fa;color:#334155;margin:4px 0 10px;line-height:1.45}
   .pistat.ok{background:#e7f4ed;color:#14532d}
   .pistat.warn{background:#fff4e5;color:#7c2d12}
@@ -2490,6 +2492,7 @@ function detectProfile(P){
   }
   P.path = path; P.x0 = x0; P.x1 = x1; P.xs = x0; P.xe = x1; P.thick = T;
   P.grid = findGridRows(P);
+  P.gy = gridProgression(P.grid); P.gx = gridProgression(findGridCols(P)); P.band = findLabelBand(P);
 }
 
 // Yatay ızgara çizgileri (referans çizgilerini bunlara yapıştırmak için)
@@ -2546,6 +2549,8 @@ function snapGrid(P, y, tol){
   return best;
 }
 function setDefaultRefs(P){
+  const gp = P.path && gridProgression(P.grid);
+  if (gp && gp.mem.length >= 3){ P.y1 = gp.mem[0].pos; P.y2 = gp.mem[gp.mem.length - 1].pos; return; }
   let lo = P.h * 0.2, hi = P.h * 0.8;
   if (P.path){
     let a = Infinity, b = -Infinity;
@@ -2626,9 +2631,180 @@ async function ocrStrip(wk, P, rx, ry, rw, rh, sc, psm, padK = 0){
   const pad = Math.round(padK * sc), c2 = document.createElement('canvas');
   c2.width = c.width + pad * 2; c2.height = c.height + pad * 2;
   const g2 = c2.getContext('2d'); g2.fillStyle = '#fff'; g2.fillRect(0, 0, c2.width, c2.height); g2.drawImage(c, pad, pad);
-  await wk.setParameters({tessedit_pageseg_mode:String(psm)});
+  await wk.setParameters({tessedit_pageseg_mode:String(psm), tessedit_char_whitelist:'0123456789.,-km '});
   const {data} = await withTimeout(wk.recognize(c2), 60000);
   return (data.words || []).map(wd => ({t:String(wd.text || ''), x0:rx + (wd.bbox.x0 - pad) / sc, x1:rx + (wd.bbox.x1 - pad) / sc, y0:ry + (wd.bbox.y0 - pad) / sc, y1:ry + (wd.bbox.y1 - pad) / sc}));
+}
+/* ---- Izgaraya dayalı okuma (Google Earth vb.) ----
+   Eşit aralıklı ızgara çizgileri piksel hassasiyetinde bulunur; her çizginin yazısı ayrı kırpılıp okunur;
+   "n. çizginin değeri = A + B·n" modeli tutarlı okumalardan kurulur. Böylece hem yuvarlanmış yazılar
+   (2116,4 → "2116") doğru hesaplanır hem de yanlış okunan yazılar elenir. */
+function gridProgression(list){
+  if (!list || list.length < 3) return null;
+  let best = null;
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++){
+    const s = list[j] - list[i]; if (s < 6) continue;
+    const mem = [list[i]]; let cur = list[i];
+    for (;;){
+      const nx = list.find(v => Math.abs(v - (cur + s)) <= Math.max(1.5, s * 0.04));
+      if (nx === undefined) break; mem.push(nx); cur = nx;
+    }
+    if (mem.length >= 3 && (!best || mem.length > best.length || (mem.length === best.length && s < best.s0))){ best = mem; best.s0 = s; }
+  }
+  if (!best) return null;
+  // Konum = y0 + k·s (en küçük kareler)
+  const s0 = best.s0, ks = best.map(v => Math.round((v - best[0]) / s0));
+  const n = ks.length, mk = ks.reduce((a, b) => a + b, 0) / n, mv = best.reduce((a, b) => a + b, 0) / n;
+  let nu = 0, den = 0; ks.forEach((k, i) => { nu += (k - mk) * (best[i] - mv); den += (k - mk) ** 2; });
+  const s = den ? nu / den : s0, y0 = mv - s * mk;
+  return {s, y0, mem:best.map((pos, i) => ({k:ks[i], pos}))};
+}
+// Izgara yazılarının bulunduğu yatay şerit (profilin altında, en çok yazı kenarı olan satırlar)
+function findLabelBand(P){
+  const {w, h, data:d, x0, x1, path} = P; if (!path) return null;
+  const lum = (x, y) => { const i = (y * w + x) * 4; return 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]; };
+  let yS = 0; for (let x = x0; x <= x1; x++) yS = Math.max(yS, path[x]);
+  yS = Math.ceil(yS) + 2;
+  if (yS >= h - 3) return null;
+  const E = [];
+  for (let y = yS; y < h; y++){ let e = 0; for (let x = x0; x < x1; x++) if (Math.abs(lum(x + 1, y) - lum(x, y)) > 35) e++; E.push(e); }
+  const srt = E.slice().sort((a, b) => a - b), thr = Math.max(25, srt[srt.length >> 1] * 3);
+  let best = null;
+  for (let i = 0; i < E.length;){
+    if (E[i] < thr){ i++; continue; }
+    let j = i, tot = 0; while (j < E.length && (E[j] >= thr || (E[j + 1] ?? 0) >= thr)){ tot += E[j]; j++; }
+    if (j - i >= 3 && j - i <= h * 0.2 && (!best || tot > best.tot)) best = {a:yS + i, b:yS + j - 1, tot};
+    i = j + 1;
+  }
+  return best ? [best.a, best.b] : null;
+}
+async function ocrCrop(wk, P, x, y, w, h, sc, opt = {}){
+  x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y));
+  w = Math.min(P.w - x, Math.ceil(w)); h = Math.min(P.h - y, Math.ceil(h));
+  if (w < 4 || h < 4) return '';
+  const c = document.createElement('canvas'); c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+  const g = c.getContext('2d', {willReadFrequently:true}); g.imageSmoothingEnabled = opt.smooth !== false; g.imageSmoothingQuality = 'high';
+  g.drawImage(P.src, x, y, w, h, 0, 0, c.width, c.height);
+  const id = g.getImageData(0, 0, c.width, c.height), d = id.data, v = new Float32Array(d.length / 4);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) v[j] = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+  const so = Array.from(v).sort((a, b) => a - b), lo = so[Math.floor(so.length * 0.03)], hi = so[Math.floor(so.length * 0.97)], med = so[so.length >> 1];
+  const inv = med < (lo + hi) / 2;   // koyu zemin üzerinde açık yazı → ters çevir
+  for (let i = 0, j = 0; i < d.length; i += 4, j++){
+    let t = Math.max(0, Math.min(255, (v[j] - lo) * 255 / Math.max(1, hi - lo))); if (inv) t = 255 - t;
+    d[i] = d[i+1] = d[i+2] = t;
+  }
+  // Kırpıntıdaki boydan boya çizgiler (görsel kenarı, grafik çerçevesi, ızgara) yazı değildir: silinir
+  const CW = c.width, CH = c.height;
+  if (opt.lines !== false) for (let x = 0; x < CW; x++){ let n = 0; for (let y = 0; y < CH; y++) if (d[(y * CW + x) * 4] < 128) n++; if (n > CH * 0.55) for (let y = 0; y < CH; y++){ const i = (y * CW + x) * 4; d[i] = d[i+1] = d[i+2] = 255; } }
+  if (opt.lines !== false) for (let y = 0; y < CH; y++){ let n = 0; for (let x = 0; x < CW; x++) if (d[(y * CW + x) * 4] < 128) n++; if (n > CW * 0.7) for (let x = 0; x < CW; x++){ const i = (y * CW + x) * 4; d[i] = d[i+1] = d[i+2] = 255; } }
+  g.putImageData(id, 0, 0);
+  const pad = Math.round(4 * sc), c2 = document.createElement('canvas');
+  c2.width = c.width + pad * 2; c2.height = c.height + pad * 2;
+  const g2 = c2.getContext('2d'); g2.fillStyle = '#fff'; g2.fillRect(0, 0, c2.width, c2.height); g2.drawImage(c, pad, pad);
+  await wk.setParameters({tessedit_pageseg_mode:'7', tessedit_char_whitelist:opt.wl || '0123456789.'});
+  const {data} = await withTimeout(wk.recognize(c2), 30000);
+  return String(data.text || '');
+}
+// Tek bir yazıdan sayı ve olası okunuşları (kaçan ondalık nokta için) çıkarır
+function parseOne(text, noAlts){
+  const t = text.replace(/\s+/g, '').replace(/[–—]/g, '-');
+  const m = t.match(/(-?[\d.,]*\d)(k?m)?/i); if (!m) return null;
+  let s = m[1]; const unit = (m[2] || '').toLowerCase();
+  if (/^-?\d{1,3}(,\d{3})+$/.test(s)) s = s.replace(/,/g, '');
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s) && unit !== 'km') s = s.replace(/\./g, '');
+  else { if ((s.match(/[.,]/g) || []).length > 1) return null; s = s.replace(',', '.'); }
+  const v = parseFloat(s); if (!isFinite(v)) return null;
+  const dec = str => { const p = str.split('.')[1]; return p ? Math.pow(10, -p.length) : 1; };
+  const alts = [{v, q:dec(s)}], digits = s.replace('-', '');
+  if (!noAlts && unit !== 'm' && /^\d{2,5}$/.test(digits))
+    for (let q = 1; q < digits.length; q++){ const a = (s.startsWith('-') ? '-' : '') + digits.slice(0, q) + '.' + digits.slice(q); alts.push({v:+a, q:dec(a)}); }
+  return {alts, prim:v, unit};
+}
+// Değer = A + B·k modelini tutarlı okumalardan kurar (sign: kot için -1, mesafe için +1)
+function fitIndex(reads, sign, minN = 3){
+  const R = reads.filter(r => r.alts.length); let best = null;
+  for (let i = 0; i < R.length; i++) for (let j = i + 1; j < R.length; j++){
+    if (R[i].k === R[j].k) continue;
+    for (const a of R[i].alts) for (const b of R[j].alts){
+      const B = (b.v - a.v) / (R[j].k - R[i].k); if (!(B * sign > 0)) continue;
+      const A = a.v - B * R[i].k, inl = new Map();
+      for (const r of R){
+        let bv = null, be = Infinity;
+        for (const c of r.alts){ const e = Math.abs(c.v - (A + B * r.k)); if (e <= Math.min(Math.max(c.q * 0.6, Math.abs(B) * 0.08), Math.abs(B) * 0.45) && e < be){ be = e; bv = c; } }
+        if (!bv) continue;
+        const cur = inl.get(r.k); if (!cur || be < cur.e) inl.set(r.k, {k:r.k, v:bv.v, q:bv.q, e:be, prim:bv.v === r.prim, unit:r.unit});
+      }
+      const L = [...inl.values()], sc = L.length + L.filter(o => o.prim).length * 0.01 - L.reduce((x, o) => x + o.e, 0) * 1e-4;
+      if (!best || sc > best.sc) best = {sc, L};
+    }
+  }
+  const kinds = new Set(R.map(r => r.k)).size;
+  if (!best || best.L.length < minN || best.L.length < kinds * 0.35) return null;
+  if (new Set(best.L.map(o => o.v)).size < best.L.length) return null;   // iki çizgiye aynı değer: okuma bozuk
+  const I = best.L, n = I.length, mk = I.reduce((x, o) => x + o.k, 0) / n, mv = I.reduce((x, o) => x + o.v, 0) / n;
+  let nu = 0, de = 0; I.forEach(o => { nu += (o.k - mk) * (o.v - mv); de += (o.k - mk) ** 2; });
+  if (!de) return null;
+  const B = nu / de, A = mv - B * mk;
+  if (!(B * sign > 0)) return null;
+  if (I.some(o => Math.abs(o.v - (A + B * o.k)) > Math.min(o.q * 0.55, Math.abs(B) * 0.3) + Math.abs(B) * 0.04)) return null;
+  return {A, B, inl:I, n, of:kinds};
+}
+async function ocrStructured(wk, P){
+  const res = {};
+  const gy = gridProgression(P.grid);
+  if (gy){
+    const regions = [];
+    if (!P.path || P.x0 <= P.w * 0.02) regions.push([P.path ? P.x0 : 0, (P.path ? P.x0 : 0) + P.w * 0.12]);
+    else regions.push([0, P.x0 + 1]);
+    if (P.path && P.w - P.x1 > P.w * 0.02) regions.push([P.x1, P.w]);
+    const base = 0.3 * gy.s, reads = [];
+    const V = [{f:8, lines:true}, {f:9, lines:true, smooth:false}, {f:6.5, lines:false}];
+    for (const o of V) for (const m of gy.mem) for (const [xa, xb] of regions){
+      const r = parseOne(await ocrCrop(wk, P, xa, m.pos - gy.s * 0.45, xb - xa, gy.s * 0.9, piClamp(o.f * 5 / base, 2, 10), o), true);
+      if (PI !== P) return null;
+      if (r) reads.push({k:m.k, ...r});
+    }
+    const f = fitIndex(reads, -1, Math.max(5, Math.ceil(gy.mem.length * 0.6)));
+    if (f) res.y = {f, g:gy, reads};
+  }
+  const cols = P.path ? findGridCols(P) : [], gx = gridProgression(cols), band = findLabelBand(P);
+  if (gx && band){
+    const bh = band[1] - band[0] + 1, reads = [];
+    const V = [{f:8, lines:false}, {f:6.5, lines:false, wl:'0123456789.,-km '}];
+    for (const o of V) for (const m of gx.mem){
+      const r = parseOne(await ocrCrop(wk, P, m.pos - gx.s * 0.48, band[0] - 2, gx.s * 0.96, bh + 4, piClamp(o.f * 5 / bh, 2, 10), o));
+      if (PI !== P) return null;
+      if (r) reads.push({k:m.k, ...r});
+    }
+    const f = fitIndex(reads, 1, Math.max(4, Math.ceil(gx.mem.length * 0.35)));
+    if (f) res.x = {f, g:gx, reads, band};
+  }
+  return res;
+}
+function applyStructured(P, st){
+  if (!st) return;
+  if (st.y){
+    const {f, g} = st.y, top = g.mem[0], bot = g.mem[g.mem.length - 1];
+    if (!P.touchedY){
+      P.y1 = top.pos; P.v1 = +(f.A + f.B * top.k).toFixed(2);
+      P.y2 = bot.pos; P.v2 = +(f.A + f.B * bot.k).toFixed(2);
+    }
+    const old = P.ruler || {};
+    // Eski yöntemin bulduğu en üst/alt yazı (ör. 1528) yeni ölçekle tutarlıysa korunur
+    const val = y => f.A + f.B * (y - g.y0) / g.s;
+    const keep = (v, fit) => v != null && fit && Math.abs(v - val((v - fit.b) / fit.a)) <= Math.abs(f.B) * 0.6 ? v : null;
+    P.ruler = {step:niceRound(Math.abs(f.B)), top:keep(old.top, old.fit), bot:keep(old.bot, old.fit)};
+    P.ocrY = true;
+  }
+  if (st.x){
+    const {f, g} = st.x, km = f.inl.filter(o => o.unit === 'km').length, m = f.inl.filter(o => o.unit === 'm').length;
+    const isKm = km > m || (!km && !m && Math.max(...f.inl.map(o => o.v)) <= 100 && f.inl.some(o => o.v % 1 !== 0));
+    P.mpp = Math.abs(f.B) * (isKm ? 1000 : 1) / g.s;
+    if (P.path && !P.touchedL) P.L = Math.round(P.mpp * (P.xe - P.xs));
+    P.ocrX = true;
+  }
+  if (st.y || st.x) P.ocr = 'ok';
+  P.ocrStruct = st;
 }
 async function runProfileOCR(P){
   P.ocr = 'run'; setPIStatus();
@@ -2651,6 +2827,10 @@ async function runProfileOCR(P){
       if (PI !== P) return;
     }
     applyOCR(P, words);
+    const first = P.ocr; P.ocr = 'run';          // ızgaraya dayalı okuma bitene kadar "okunuyor" kalır
+    const st = await ocrStructured(wk, P);
+    if (PI !== P) return;
+    P.ocr = first; applyStructured(P, st);
   } catch(e){
     console.warn('OCR:', e);
     if (PI !== P) return;
@@ -2731,11 +2911,13 @@ function fitLabels(L, along, across, sign, tolAcross){
           seen.add(bv); inl.push({...o, v:bv}); res += br; if (o.prims.includes(bv)) prim++;
         }
         const score = inl.length + prim * 0.01 - res * 1e-4;
-        if (!best || score > best.score) best = {score, inl};
+        if (!best || score > best.score) best = {score, inl, gn:G.length};
       }
     }
   }
-  if (!best || best.inl.length < 3) return null;
+  if (!best || best.inl.length < 4 || best.inl.length < best.gn * 0.5) return null;
+  { const ps = best.inl.map(o => o[along]).sort((a, b) => a - b);
+    for (let i = 1; i < ps.length; i++) if (ps[i] - ps[i - 1] < 2) return null; }   // aynı yere iki farklı değer: okuma bozuk
   // Adım (ör. 0,25 km ya da 10 m) bulunur; ölçek yalnızca adımın katı olan (doğru okunmuş) yazılarla kurulur
   const vs = [...new Set(best.inl.map(o => o.v))].sort((a, b) => a - b), dv = [];
   for (let i = 1; i < vs.length; i++) dv.push(vs[i] - vs[i - 1]);
@@ -2798,7 +2980,7 @@ function applyOCR(P, words){
       }
       return best ? best.v : null;
     };
-    P.ruler = {step:fy.step > 0 ? fy.step : null, top:edge(true), bot:edge(false)};
+    P.ruler = {step:fy.step > 0 ? fy.step : null, top:edge(true), bot:edge(false), fit:{a:fy.a, b:fy.b}};
   }
   if (fy && !P.touchedY){
     const vs = fy.inl.map(o => o.v), vT = Math.max(...vs), vB = Math.min(...vs);
@@ -2827,10 +3009,11 @@ function showProfileModal(){
       <span><i style="border-color:#1565c0"></i>Bulunan arazi çizgisi</span>
       <span><i style="border-color:#ef6c00;border-top-style:dashed"></i>Kot referans çizgileri (sürükleyin)</span>
       <span><i style="border-color:#2e7d32"></i>Profil başı / sonu (sürükleyerek kırpın)</span>
+      <span><b style="color:#00695c">2078,0</b> Hesaplanan değerler: görseldeki yazılarla aynı olmalı</span>
     </div>
     <div class="grid g3">
-      <label>Üst turuncu çizginin kotu (m)<input type="number" step="any" id="piV1"></label>
-      <label>Alt turuncu çizginin kotu (m)<input type="number" step="any" id="piV2"></label>
+      <label>Üst turuncu çizginin kotu (m)<span class="pizrow"><canvas class="piz" id="piZ1" title="Görselde bu çizginin yanındaki yazı"></canvas><input type="number" step="any" id="piV1"></span></label>
+      <label>Alt turuncu çizginin kotu (m)<span class="pizrow"><canvas class="piz" id="piZ2" title="Görselde bu çizginin yanındaki yazı"></canvas><input type="number" step="any" id="piV2"></span></label>
       <label>Kesit uzunluğu – yeşil çizgiler arası (m)<input type="number" step="any" min="0" id="piL"></label>
     </div>
     <div class="row" style="margin-top:10px;flex-wrap:wrap">
@@ -2868,7 +3051,7 @@ function setPIStatus(){
   else if (P.ocr === 'run') msg = '⏳ Arazi çizgisi bulundu (mavi). Görseldeki kot ve mesafe yazıları okunuyor… İlk seferde birkaç saniye sürebilir; beklemeden değerleri kendiniz de girebilirsiniz.';
   else if (P.ocr === 'ok' && P.ocrY && P.ocrX){ cls = 'ok'; msg = `✔ Kotlar ve kesit uzunluğu görseldeki yazılardan okundu. Turuncu çizgilerin, kotu yazılan ızgara çizgilerinin üzerinde olduğunu kontrol edin; gerekirse sürükleyin ya da değerleri düzeltin.`; }
   else if (P.ocr === 'ok'){ cls = 'warn'; msg = P.ocrY ? '✔ Kotlar okundu. Mesafe yazıları okunamadı: <b>kesit uzunluğunu</b> girin (görselin altındaki son mesafe değeri).'
-                                                       : '✔ Kesit uzunluğu okundu. Kot yazıları okunamadı: turuncu çizgileri iki kot çizgisinin üzerine sürükleyip <b>kotlarını</b> girin.'; }
+                                                       : '✔ Kesit uzunluğu okundu. <b>Kot yazıları güvenilir okunamadı</b> (görseldeki yazılar çok küçük). Turuncu çizgiler en üst ve en alt yazılı kot çizgisine yerleştirildi: kutuların yanındaki büyütülmüş yazılara bakıp bu iki <b>kotu</b> girin. Önizlemedeki yeşil kontrol yazıları görseldeki kotlarla aynı olmalı.'; }
   else { cls = 'warn'; msg = '⚠ Görseldeki yazılar otomatik okunamadı' + (P.ocr === 'fail' ? ' (otomatik okuma için internet bağlantısı gerekir)' : '') +
                        '. Turuncu çizgileri kotu bilinen iki yatay çizginin üzerine sürükleyip <b>kotlarını</b>, ardından <b>kesit uzunluğunu</b> girin.'; }
   el.className = 'pistat' + (cls ? ' ' + cls : ''); el.innerHTML = msg;
@@ -2887,6 +3070,7 @@ function updatePI(){
        · başlangıç kotu ${piFmt(r.pts[0][1])} m · bitiş kotu ${piFmt(r.pts[r.pts.length - 1][1])} m
        ${P.fitAxis ? (A => `<br>📏 Kot cetveli: <b>${piFmt(A.start)} m</b>'den <b>${piFmt(A.end)} m</b>'ye, ara değerler <b>${piFmt(A.step)} m</b> aralıklı düz sayılar`)(profileRuler(r)) : ''}`;
   ap.disabled = false;
+  drawPIZoom();
   ap.innerHTML = P.autoApply ? '⏳ Yazılar okunuyor… bitince aktarılacak' : '✔ Profili kesite aktar';
   ['piV1', 'piV2', 'piL'].forEach(id => { const el = document.getElementById(id); if (el && el.value !== '') el.classList.remove('bad'); });
   drawPI();
@@ -2919,6 +3103,18 @@ function buildProfilePts(){
   const zs = pts.map(p => p[1]);
   return {pts, min:Math.min(...zs), max:Math.max(...zs)};
 }
+function drawPIZoom(){
+  const P = PI; if (!P) return;
+  [['piZ1', P.y1], ['piZ2', P.y2]].forEach(([id, y]) => {
+    const c = document.getElementById(id); if (!c || y === null) return;
+    const dpr = window.devicePixelRatio || 1; c.width = 96 * dpr; c.height = 32 * dpr;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    const sp = P.gy ? P.gy.s : 20, xr = P.path && P.x0 > P.w * 0.02 ? P.x0 + 2 : Math.min(P.w, P.w * 0.15);
+    const sh = Math.max(8, sp * 0.9), sw = Math.min(xr, sh * 3);
+    g.imageSmoothingQuality = 'high'; g.drawImage(P.src, Math.max(0, xr - sw), Math.max(0, y - sh / 2), sw, sh, 0, 0, c.width, c.height);
+    g.strokeStyle = 'rgba(239,108,0,.7)'; g.lineWidth = dpr; g.beginPath(); g.moveTo(0, c.height / 2); g.lineTo(c.width, c.height / 2); g.stroke();
+  });
+}
 function drawPI(){
   const cv = document.getElementById('piCv'), P = PI; if (!cv || !P) return;
   const g = cv.getContext('2d'), k = P.s * P.dpr, px = 1 / P.s;
@@ -2942,6 +3138,27 @@ function drawPI(){
     for (const x of [P.xs, P.xe]){ g.beginPath(); g.moveTo(x + .5, 0); g.lineTo(x + .5, P.h); g.stroke(); }
     label('Başlangıç · 0 m', P.xs + 4 * px, 10 * px, '#2e7d32');
     label('Bitiş' + (P.L > 0 ? ' · ' + piFmt(P.L) + ' m' : ''), P.xe - 4 * px, 10 * px, '#2e7d32', 'right');
+  }
+  // Kontrol yazıları: hesaplanan değerler, görseldeki yazılarla aynı olmalı
+  const okY = P.path && P.v1 !== null && P.v2 !== null && Math.abs(P.y2 - P.y1) >= 2 && P.v1 !== P.v2;
+  if (okY && P.gy){
+    const ky = (P.v2 - P.v1) / (P.y2 - P.y1);
+    g.font = `600 ${11 * px}px "Segoe UI",system-ui,sans-serif`; g.textBaseline = 'middle'; g.textAlign = 'right';
+    for (const m of P.gy.mem){
+      const t = piFmt(P.v1 + (m.pos - P.y1) * ky), tw = g.measureText(t).width, xr = P.xe - 6 * px;
+      g.fillStyle = 'rgba(255,255,255,.85)'; g.fillRect(xr - tw - 3 * px, m.pos + .5 - 7 * px, tw + 6 * px, 14 * px);
+      g.fillStyle = '#00695c'; g.fillText(t, xr, m.pos + .5);
+    }
+  }
+  if (P.path && P.L > 0 && P.gx && P.xe > P.xs){
+    g.font = `600 ${11 * px}px "Segoe UI",system-ui,sans-serif`; g.textBaseline = 'top'; g.textAlign = 'center';
+    for (const m of P.gx.mem){
+      if (m.pos <= P.xs + 2 || m.pos >= P.xe - 2) continue;
+      const d = (m.pos - P.xs) / (P.xe - P.xs) * P.L, t = P.L >= 1000 ? String(+(d / 1000).toFixed(3)).replace('.', ',') + ' km' : piFmt(+d.toFixed(1)) + ' m', tw = g.measureText(t).width;
+      const ty = P.band ? P.band[0] - 17 * px : P.h - 40 * px;   // görseldeki mesafe yazılarının hemen üstü
+      g.fillStyle = 'rgba(255,255,255,.85)'; g.fillRect(m.pos - tw / 2 - 3 * px, ty, tw + 6 * px, 14 * px);
+      g.fillStyle = '#00695c'; g.fillText(t, m.pos, ty + px);
+    }
   }
   g.lineWidth = 1.6 * px; g.strokeStyle = '#ef6c00'; g.setLineDash([7 * px, 4 * px]);
   for (const [y, v, n] of [[P.y1, P.v1, 'Üst'], [P.y2, P.v2, 'Alt']]){
@@ -3036,7 +3253,9 @@ function showPIError(msg){
 // ara değerler görseldeki cetvelin adımıyla düz sayılardır (ör. 1528, 1520, 1510 … 1420, 1410)
 function profileRuler(r){
   const R = PI && PI.ruler || {};
-  const st = R.step > 0 ? R.step : profNiceStep(Math.max(1, r.max - r.min));
+  // Adım: görseldeki cetvelin adımı (okunduysa) ya da ızgara aralığından; yoksa kot aralığından
+  const P = PI, gridStep = P && P.gy && P.v1 !== null && P.v2 !== null && P.y2 !== P.y1 ? Math.abs((P.v2 - P.v1) / (P.y2 - P.y1) * P.gy.s) : 0;
+  const st = R.step > 0 ? R.step : gridStep > 0 ? niceRound(gridStep) : profNiceStep(Math.max(1, r.max - r.min));
   let top = Math.ceil(r.max - 1e-9), bot = Math.floor(r.min + 1e-9);
   if (R.top !== null && R.top !== undefined && R.top >= r.max - 2 && R.top <= r.max + st) top = Math.max(top, R.top);
   if (R.bot !== null && R.bot !== undefined && R.bot <= r.min + 2 && R.bot >= r.min - st) bot = Math.min(bot, R.bot);
