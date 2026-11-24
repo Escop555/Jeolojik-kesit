@@ -127,6 +127,9 @@
   .pimp .hint{margin:0;font-size:11.5px}
   .piwrap{background:#f1f5f9;border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;justify-content:center}
   #piCv{display:block;touch-action:none}
+  .bhst{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+  .bhst .tool{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;font-size:11.5px;line-height:1.15}
+  .bhprev{width:22px;height:60px}
   .legord{display:flex;flex-direction:column;gap:4px}
   .lgo{display:flex;align-items:center;gap:8px;padding:5px 6px;border:1px solid var(--line2);border-radius:8px;background:var(--card, #fff);cursor:grab}
   .lgo .grip{color:#94a3b8;font-weight:700;letter-spacing:-2px;flex:none}
@@ -554,7 +557,7 @@ function blankState(formations){
   return {
     project:{title:'JEOLOJİK KESİT', dirLeft:'K', dirRight:'G', subtitle:'', notes:''},
     settings:{vex:null, heightRatio:0.3, unit:'auto', elevSuffix:false, vgrid:false,
-              showBhElev:true, showCodes:false, codeCount:null, codeCfg:{}, showBodyKot:true, groundStyle:'red', exportScale:3, showHandles:true,
+              showBhElev:true, bhStyle:'serit', bhColor:'#d32f2f', showCodes:false, codeCount:null, codeCfg:{}, showBodyKot:true, groundStyle:'red', exportScale:3, showHandles:true,
               contactNote:'(Formasyon alt sınırı kesit boyunca devam etmektedir.)'},
     formations: formations || defaultFormations(),
     customPatterns:{},
@@ -1424,6 +1427,47 @@ function draw(canvas, s, edit = false){
   ctx.fillStyle = '#000'; ctx.font = FT(26, 'axisX');
   ctx.fillText(`Uzaklık (${useKm ? 'km' : 'm'})`, ml + plotW/2, mt + plotH + 26 + 36 * tX);
 
+  /* ---- Sondaj kutucuğu ---- */
+  // Verilen noktadaki formasyon: en üstteki (son çizilen) birim, yoksa ana birim
+  const inPolyD = (q, px, py) => { let c = false; for (let a = 0, b = q.length - 1; a < q.length; b = a++){ const [xa, ya] = q[a], [xb, yb] = q[b]; if ((ya > py) !== (yb > py) && px < (xb - xa) * (py - ya) / (yb - ya) + xa) c = !c; } return c; };
+  const formAt = (x, z) => {
+    for (let j = m.polys.length - 1; j >= 0; j--){ const p = m.polys[j]; if (p.pts.length >= 3 && inPolyD(p.pts, x, z)){ const isBg = p.body.fid === '__bg'; return p.fid === '__blank' ? null : {f:effF(fById(p.fid), isBg ? state.bgColor : p.body.color), sc:isBg ? state.bgScale : p.body.pscale, k:p.fid + '|' + (isBg ? state.bgColor : p.body.color)}; } }
+    return {f:effF(fById(state.bg), state.bgColor), sc:state.bgScale, k:state.bg + '|' + state.bgColor};
+  };
+  // o: {pxPerM, x (kesit mesafesi), y0 (ağız kotunun ekran y'si)} — lejant için o yok
+  function bhBox(g, x, yTop, yBot, o){
+    const st = S.bhStyle || 'serit', col = S.bhColor || '#d32f2f', w = 18, x0 = x - w / 2, h = yBot - yTop;
+    if (h <= 0) return;
+    g.save();
+    if (st === 'beyaz'){ g.fillStyle = '#fff'; g.fillRect(x0, yTop, w, h); }
+    else if (st === 'renk'){ g.fillStyle = col; g.fillRect(x0, yTop, w, h); }
+    else if (st === 'silindir'){
+      const gr = g.createLinearGradient(x0, 0, x0 + w, 0);
+      gr.addColorStop(0, shadeHex(col, -0.45)); gr.addColorStop(0.32, shadeHex(col, 0.55)); gr.addColorStop(0.55, col); gr.addColorStop(1, shadeHex(col, -0.5));
+      g.fillStyle = gr; g.fillRect(x0, yTop, w, h);
+    } else if (st === 'log' && o){
+      // Sondajın geçtiği formasyonlar, derinlik boyunca kendi desenleriyle
+      let y = yTop, cur = null, ys = yTop;
+      const flush = ye => { if (ye > ys){ g.beginPath(); g.rect(x0, ys, w, ye - ys); if (cur && cur.f) fillFormation(g, cur.f, s, cur.sc); else { g.fillStyle = '#fff'; g.fill(); } } };
+      for (; y <= yBot; y += 2){
+        const z = m.top - (Math.max(y, o.y0) - mt) / vpx, fa = formAt(o.x, z), k = fa ? fa.k : '';
+        if (!cur || cur.k !== k){ flush(y); cur = fa ? fa : {k:''}; ys = y; }
+      }
+      flush(yBot);
+    } else if (st === 'log'){ g.fillStyle = '#fff'; g.fillRect(x0, yTop, w, h); }   // lejant simgesi
+    else {
+      // Şeritli: renk / beyaz bantlar, her bant belirli bir metre aralığı (derinlik okunur)
+      const pm = o ? o.pxPerM : 1, step = o ? ([1, 2, 5, 10, 20, 50, 100].find(d => d * pm >= 9) || 100) * pm : 14;
+      g.fillStyle = '#fff'; g.fillRect(x0, yTop, w, h);
+      g.fillStyle = col;
+      const yb0 = o ? o.y0 : yTop;
+      if (o && o.y0 > yTop) g.fillRect(x0, yTop, w, o.y0 - yTop);   // ağız üstü kısmı renkli
+      for (let i = 0, y = yb0; y < yBot; i++, y += step) if (i % 2 === 0) g.fillRect(x0, y, w, Math.min(step, yBot - y));
+    }
+    g.strokeStyle = '#000'; g.lineWidth = 2; g.strokeRect(x0, yTop, w, h);
+    g.restore();
+  }
+
   /* ---- Formasyonlar ---- */
   const gxs = m.gxs;
   const groundLine = () => { ctx.beginPath(); gxs.forEach((x, i) => i ? ctx.lineTo(X(x), Y(ground(x))) : ctx.moveTo(X(x), Y(ground(x)))); };
@@ -1589,8 +1633,7 @@ function draw(canvas, s, edit = false){
   for (const b of m.bhs){
     if (b.ch < m.xmin || b.ch > m.xmax) continue;
     const x = X(b.ch), yTop = Y(b.elev) - 12, yBot = Math.min(Y(b.elev - b.depth), mt + plotH);
-    ctx.fillStyle = '#fff'; ctx.fillRect(x - 9, yTop, 18, yBot - yTop);
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.strokeRect(x - 9, yTop, 18, yBot - yTop);
+    bhBox(ctx, x, yTop, yBot, {pxPerM:vpx, x:b.ch, y0:Y(b.elev)});
     ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
     const tb = TS('bh');
     let ly = yTop - 8;
@@ -1664,7 +1707,7 @@ function draw(canvas, s, edit = false){
         wrapText(S.contactNote, 'italic 17px Arial', 300).forEach((l, i) => T(l, 30 + i * 24, 'italic 17px Arial'));
       } else if (it.kind === 'bh'){
         ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText(m.bhs[0]?.name || 'SK', ix + 50, y - 4); ctx.textAlign = 'left';
-        ctx.fillStyle = '#fff'; ctx.fillRect(ix + 42, y + 18, 16, 72); ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.strokeRect(ix + 42, y + 18, 16, 72);
+        bhBox(ctx, ix + 50, y + 18, y + 90, null);
         T('Sondaj Noktası', 8, 'bold 20px Arial'); T('(Düşey ölçek abartılıdır)', 36, 'bold 18px Arial'); T('(Vertical scale is exaggerated)', 64, 'italic 17px Arial');
       } else if (it.kind === 'masw'){
         ctx.strokeStyle = '#6a2c91'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
@@ -1944,6 +1987,12 @@ const scaleCtl = (path, val, label = 'Desen boyutu', min = 0.25, max = 6) => {
     <b class="sv">${v.toFixed(2)}x</b><button class="sm" data-action="resetScale" data-p="${path}" title="Varsayılan boyut">1x</button></div>`;
 };
 // Kesite özel renk seçici (kütüphaneyi değiştirmez)
+function shadeHex(hex, t){   // t<0 koyulaştır, t>0 aç
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '')); if (!m) return hex;
+  const n = parseInt(m[1], 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(v => Math.round(t < 0 ? v * (1 + t) : v + (255 - v) * t));
+  return '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
+}
+const BH_COLORS = [['#d32f2f', 'Kırmızı'], ['#f57c00', 'Turuncu'], ['#fbc02d', 'Sarı'], ['#2e7d32', 'Yeşil'], ['#00838f', 'Turkuaz'], ['#1565c0', 'Mavi'], ['#6a1b9a', 'Mor'], ['#37474f', 'Antrasit']];
 const COLOR_PRESETS = [
   ['#8fc4b7', 'Yeşilimsi mavi'], ['#9fc3e2', 'Mavimsi'], ['#a9c98f', 'Yeşilimsi'], ['#b58b62', 'Kahverengi'],
   ['#d9b98c', 'Açık kahve'], ['#ecd679', 'Sarımsı'], ['#d39a7c', 'Kırmızımsı'], ['#b5b5b5', 'Gri'], ['#ffffff', 'Beyaz'],
@@ -1982,6 +2031,7 @@ function renderPanel(){
           : ui.tab === 'lejant' ? panelLegend() : panelSettings();
   const st = panel.scrollTop; panel.innerHTML = h; sectionize(); panel.scrollTop = st;
   if (ui.tab === 'formasyon') applyFilter();
+  if (ui.tab === 'noktalar') drawBhPreviews();
   if (ui.lastTab !== ui.tab){
     ui.lastTab = ui.tab; panel.scrollTop = 0;
     panel.classList.remove('fade'); void panel.offsetWidth; panel.classList.add('fade');
@@ -2132,8 +2182,34 @@ function listBlock(title, hint, key, cols, fields, addLabel, textKey){
   });
   return h + `<button class="sm add" data-action="add" data-list="${key}">+ ${addLabel}</button>`;
 }
+function bhStylePanel(){
+  const S = state.settings, st = S.bhStyle || 'serit', col = S.bhColor || '#d32f2f';
+  const B = [['serit', 'Şeritli', 'Renkli / beyaz bantlar, derinlik okunur'], ['renk', 'Düz renk', 'Tek renk dolgu'], ['silindir', 'Silindir', 'Gölgeli, boru görünümü'],
+             ['log', 'Formasyon logu', 'Geçtiği formasyonların deseni'], ['beyaz', 'Beyaz', 'Klasik görünüm']];
+  return `<h3>Sondaj görünümü</h3>
+    <div class="bhst">${B.map(([v, n, d]) => `<button class="${st === v ? 'tool on' : 'tool'}" data-action="bhStyle" data-v="${v}" title="${d}"><canvas class="bhprev" data-v="${v}" width="22" height="60"></canvas><span>${n}</span></button>`).join('')}</div>
+    ${st !== 'beyaz' && st !== 'log' ? `<div class="clr" style="margin-top:8px"><span>Renk</span>
+      <input type="color" data-path="settings.bhColor" data-rr="1" value="${esc(col)}" title="Renk seç">
+      <div class="pre">${BH_COLORS.map(([c, n]) => `<button class="dot${col === c ? ' on' : ''}" style="background:${c}" title="${n}" data-action="setColor" data-p="settings.bhColor" data-c="${c}"></button>`).join('')}</div></div>` : ''}
+    ${st === 'serit' ? '<p class="hint" style="margin-top:4px">Her bant ölçeğe göre 1, 2, 5, 10… m derinliği gösterir.</p>' : ''}
+    ${st === 'log' ? '<p class="hint" style="margin-top:4px">Kutucuk, sondajın kestiği formasyonların desen ve renkleriyle dolar.</p>' : ''}`;
+}
+// Paneldeki küçük önizlemeler
+function drawBhPreviews(){
+  const col = state.settings.bhColor || '#d32f2f';
+  document.querySelectorAll('canvas.bhprev').forEach(c => {
+    const g = c.getContext('2d'), v = c.dataset.v, w = 14, x0 = 4, h = 56, y0 = 2;
+    g.clearRect(0, 0, c.width, c.height);
+    if (v === 'beyaz'){ g.fillStyle = '#fff'; g.fillRect(x0, y0, w, h); }
+    else if (v === 'renk'){ g.fillStyle = col; g.fillRect(x0, y0, w, h); }
+    else if (v === 'silindir'){ const gr = g.createLinearGradient(x0, 0, x0 + w, 0); gr.addColorStop(0, shadeHex(col, -0.45)); gr.addColorStop(0.32, shadeHex(col, 0.55)); gr.addColorStop(0.55, col); gr.addColorStop(1, shadeHex(col, -0.5)); g.fillStyle = gr; g.fillRect(x0, y0, w, h); }
+    else if (v === 'log'){ const fs2 = legendForms(); const cs = fs2.length ? fs2.map(f => f.color) : ['#f7b548', '#3f80d8']; const n = Math.min(3, cs.length) || 1; for (let i = 0; i < n; i++){ g.fillStyle = cs[i]; g.fillRect(x0, y0 + h * i / n, w, h / n + 0.5); } }
+    else { g.fillStyle = '#fff'; g.fillRect(x0, y0, w, h); g.fillStyle = col; for (let i = 0; i < 7; i += 2) g.fillRect(x0, y0 + i * 8, w, Math.min(8, h - i * 8)); }
+    g.strokeStyle = '#000'; g.lineWidth = 1.5; g.strokeRect(x0, y0, w, h);
+  });
+}
 function panelPoints(){
-  return listBlock('Sondajlar', 'Mesafe kesit başından itibaren metre cinsindendir. Ağız kotu boş bırakılırsa topoğrafyadan alınır. YASS: yeraltı su seviyesi derinliği (isteğe bağlı).',
+  return bhStylePanel() + listBlock('Sondajlar', 'Mesafe kesit başından itibaren metre cinsindendir. Ağız kotu boş bırakılırsa topoğrafyadan alınır. YASS: yeraltı su seviyesi derinliği (isteğe bağlı).',
       'boreholes', '1.1fr 1fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Derinlik (m)','depth',{type:'number'}],['Ağız kotu','elev',{type:'number',ph:'otomatik'}],['YASS (m)','gwl',{type:'number',ph:'yok'}]], 'Sondaj ekle', 'bh')
     + listBlock('MASW – Kırılma hatları', 'Hattın orta noktasının mesafesi, hat uzunluğu ve Vs(30) hızı.',
       'masw', '1.6fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Uzunluk (m)','len',{type:'number'}],['Vs(30)','vs',{type:'number'}]], 'MASW hattı ekle', 'masw')
@@ -2401,6 +2477,7 @@ document.addEventListener('click', e => {
     case 'legTitle': state.legend.titleAlign = t.dataset.v; break;
     case 'legLayout': state.legend.layout = t.dataset.v; break;
     case 'legSym': state.legend.symPos = t.dataset.v; break;
+    case 'bhStyle': state.settings.bhStyle = t.dataset.v; break;
     case 'legAge': state.legend.order = []; toast('Formasyonlar gençten yaşlıya sıralandı'); break;
     case 'legMv': {
       const L = legendForms().map(f => f._key), j = i + +t.dataset.d; if (j < 0 || j >= L.length) return;
@@ -3884,7 +3961,7 @@ function rebuild3D(){
   V3.group.add(new THREE.LineSegments(lg, lm));
 
   // Sondajlar
-  const bhMat = new THREE.MeshLambertMaterial({color:0xffffff}); V3.disp.push(bhMat);
+  const bhSt = state.settings.bhStyle || 'serit', bhMat = new THREE.MeshLambertMaterial({color:bhSt === 'beyaz' || bhSt === 'log' ? 0xffffff : new THREE.Color(state.settings.bhColor || '#d32f2f')}); V3.disp.push(bhMat);
   const capMat = new THREE.MeshLambertMaterial({color:0x22313f}); V3.disp.push(capMat);
   for (const b of m.bhs){
     if (b.ch < m.xmin || b.ch > m.xmax) continue;
