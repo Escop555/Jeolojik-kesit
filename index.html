@@ -561,7 +561,7 @@ function blankState(formations){
     axis:{left:{start:1000, step:10, end:900}, right:{same:true, start:1000, step:10, end:900}, round:true},
     topo:{length:1000, smooth:true, pts:[[0, 965], [1000, 965]]},
     text:{title:1, axis:1, axisY:1, axisX:1, code:1, bh:1, masw:1, mikro:1, fault:1},
-    legend:{pos:'alt', scale:1, width:680, title:false, border:true, titleAlign:'sol', layout:'sutun', order:[],
+    legend:{pos:'alt', scale:1, width:680, title:false, border:true, titleAlign:'sol', layout:'sutun', symPos:'sag', order:[],
             items:{ground:true, contact:true, bh:true, masw:true, mikro:true, gwl:true, fault:true}},
     bg:'f-jks', bgScale:1, bodies:[], boreholes:[], masw:[], mikro:[], faults:[]
   };
@@ -1286,11 +1286,17 @@ function draw(canvas, s, edit = false){
   const lineH = font => Math.round(parseInt(font.match(/(\d+)px/)[1], 10) * 1.35);
   const wrapLines = (spec, tw) => spec.filter(([t]) => t).flatMap(([t, font]) => wrapText(t, font, tw).map(l => [l, font]));
   const stack = LG.layout !== 'akis', GAP = 40;
-  // Alt alta düzende iki sütun sığıyorsa semboller sağda, sığmıyorsa formasyonların altında
+  // Alt alta düzende sembollerin yeri: sağda / ortada sütun (sığmazsa altta), altta alt alta, altta yan yana
+  const symPos = LG.symPos || 'sag';
   const symW0 = Math.min(440, Math.max(300, innerW * 0.4));
-  const twoCol = stack && sym.length && usedF.length && innerW - symW0 - GAP >= 380;
-  const symCW = twoCol ? symW0 : innerW;
-  const formCW = twoCol ? innerW - symCW - GAP : innerW;
+  const side = stack && sym.length && (symPos === 'sag' || symPos === 'orta') && innerW - symW0 - GAP >= 380;
+  let symCW, symX = 0, formCW = innerW;
+  if (side){
+    symCW = symW0;
+    if (symPos === 'orta'){ symX = Math.max(380 + GAP, Math.round(innerW / 2 - symCW / 2)); formCW = symX - GAP; }
+    else { symX = innerW - symCW; formCW = symX - GAP; }
+  } else symCW = symPos === 'yanyana' ? fitW(440) : Math.min(innerW, 560);
+  const symFlow = stack && !side && symPos === 'yanyana';
   for (const f of usedF){
     const w = stack ? formCW : fitW(600), tw = w - 120;
     const lines = [
@@ -1317,13 +1323,22 @@ function draw(canvas, s, edit = false){
   });
   let cx = 0, cy = LG.title ? 46 : 0, rowH = 0;
   if (stack){
-    const y0 = cy; let yf = y0, ys = y0;
-    items.forEach(it => {
-      if (it.kind === 'f'){ it.x = 0; it.y = yf; yf += it.h + 16; }
-      else if (twoCol){ it.x = innerW - symCW; it.y = ys; ys += it.h + 22; }
-      else { if (ys === y0) ys = yf > y0 ? yf + 10 : y0; it.x = 0; it.y = ys; ys += it.h + 22; }
-    });
-    cy = Math.max(yf - 16, ys - 22, y0); rowH = 0;
+    const y0 = cy; let yf = y0;
+    items.forEach(it => { if (it.kind === 'f'){ it.x = 0; it.y = yf; yf += it.h + 16; } });
+    const S = items.filter(it => it.kind !== 'f');
+    let ys = side ? y0 : (yf > y0 ? yf + 10 : y0), end = ys;
+    if (symFlow){
+      let sx = 0, rh = 0;
+      S.forEach(it => {
+        if (sx > 0 && sx + it.w > innerW){ sx = 0; ys += rh + 22; rh = 0; }
+        it.x = sx; it.y = ys; sx += it.w + 20; rh = Math.max(rh, it.h);
+      });
+      end = ys + rh + 22;
+    } else {
+      S.forEach(it => { it.x = side ? symX : 0; it.y = ys; ys += it.h + 22; });
+      end = ys;
+    }
+    cy = Math.max(yf - 16, S.length ? end - 22 : y0, y0); rowH = 0;
   } else items.forEach(it => {
     if (cx > 0 && cx + it.w > innerW){ cx = 0; cy += rowH + 22; rowH = 0; }
     it.x = cx; it.y = cy; cx += it.w + 20; rowH = Math.max(rowH, it.h);
@@ -2153,9 +2168,15 @@ function panelLegend(){
     ${chk('Çerçeve çiz', 'legend.border', LG.border !== false)}
     <h3>Düzen</h3>
     <div class="row" style="margin-top:0">
-      <button class="${LG.layout !== 'akis' ? 'tool on' : 'tool'}" data-action="legLayout" data-v="sutun" style="flex:1;padding:10px">▤ ┃ ≡<br>Alt alta<br><small>formasyonlar solda, semboller sağda</small></button>
+      <button class="${LG.layout !== 'akis' ? 'tool on' : 'tool'}" data-action="legLayout" data-v="sutun" style="flex:1;padding:10px">▤ ┃ ≡<br>Alt alta<br><small>formasyonlar alt alta sıralı</small></button>
       <button class="${LG.layout === 'akis' ? 'tool on' : 'tool'}" data-action="legLayout" data-v="akis" style="flex:1;padding:10px">▤ ▤ ▤<br>Yan yana<br><small>sığdığı kadar sıralı</small></button>
     </div>
+    ${LG.layout !== 'akis' ? `<div style="margin-top:8px"><span class="hint" style="margin:0">Diğer gösterimlerin yeri (zemin profili, sondaj, MASW…)</span>
+      <div class="row" style="margin-top:4px;gap:6px;flex-wrap:wrap">
+      ${[['sag', '▤ ≡', 'Sağda alt alta'], ['orta', '▤ ≡ ·', 'Ortada alt alta'], ['alt', '▤<br>≡', 'Altta alt alta'], ['yanyana', '▤<br>▭ ▭ ▭', 'Altta yan yana']].map(([v, ic, n]) =>
+        `<button class="${(LG.symPos || 'sag') === v ? 'tool on' : 'tool'}" data-action="legSym" data-v="${v}" style="flex:1 1 45%;padding:8px">${ic}<br>${n}</button>`).join('')}
+      </div>
+      ${LG.pos === 'sag' && (LG.symPos || 'sag') !== 'alt' && (LG.symPos || 'sag') !== 'yanyana' ? '<p class="hint" style="margin-top:4px">Lejant dar olduğunda gösterimler sığmazsa formasyonların altına geçer. Genişliği artırarak yanlara alabilirsiniz.</p>' : ''}</div>` : ''}
     ${legOrderPanel()}
     <h3>Lejantta gösterilecekler</h3>
     <p class="hint">Kesitte kullanılan formasyonlar lejanta otomatik eklenir. Aşağıdaki semboller kesitte varsa gösterilir.</p>
@@ -2327,6 +2348,7 @@ document.addEventListener('click', e => {
     case 'legPos': state.legend.pos = t.dataset.v; ui.zoom = 0; break;
     case 'legTitle': state.legend.titleAlign = t.dataset.v; break;
     case 'legLayout': state.legend.layout = t.dataset.v; break;
+    case 'legSym': state.legend.symPos = t.dataset.v; break;
     case 'legAge': state.legend.order = []; toast('Formasyonlar gençten yaşlıya sıralandı'); break;
     case 'legMv': {
       const L = legendForms().map(f => f._key), j = i + +t.dataset.d; if (j < 0 || j >= L.length) return;
