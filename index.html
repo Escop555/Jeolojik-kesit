@@ -127,6 +127,16 @@
   .pimp .hint{margin:0;font-size:11.5px}
   .piwrap{background:#f1f5f9;border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;justify-content:center}
   #piCv{display:block;touch-action:none}
+  .legord{display:flex;flex-direction:column;gap:4px}
+  .lgo{display:flex;align-items:center;gap:8px;padding:5px 6px;border:1px solid var(--line2);border-radius:8px;background:var(--card, #fff);cursor:grab}
+  .lgo .grip{color:#94a3b8;font-weight:700;letter-spacing:-2px;flex:none}
+  .lgo .sw{width:34px;height:24px;flex:none}
+  .lgo .nm{flex:1;min-width:0;font-size:13px;line-height:1.2}
+  .lgo .nm small{display:block;color:#64748b;font-size:11px}
+  .lgo .tool{padding:3px 8px;flex:none}
+  .lgo.dragging{opacity:.45}
+  .lgo.over-t{box-shadow:inset 0 3px 0 #1f7a4d}
+  .lgo.over-b{box-shadow:inset 0 -3px 0 #1f7a4d}
   .pizrow{display:flex;gap:6px;align-items:center}
   .piz{width:96px;height:32px;flex:none;border:1px solid var(--line2);border-radius:6px;background:#fff;image-rendering:auto}
   .pistat{font-size:12.5px;padding:8px 11px;border-radius:8px;background:#f4f7fa;color:#334155;margin:4px 0 10px;line-height:1.45}
@@ -551,7 +561,7 @@ function blankState(formations){
     axis:{left:{start:1000, step:10, end:900}, right:{same:true, start:1000, step:10, end:900}, round:true},
     topo:{length:1000, smooth:true, pts:[[0, 965], [1000, 965]]},
     text:{title:1, axis:1, axisY:1, axisX:1, code:1, bh:1, masw:1, mikro:1, fault:1},
-    legend:{pos:'alt', scale:1, width:680, title:false, border:true,
+    legend:{pos:'alt', scale:1, width:680, title:false, border:true, titleAlign:'sol', layout:'sutun', order:[],
             items:{ground:true, contact:true, bh:true, masw:true, mikro:true, gwl:true, fault:true}},
     bg:'f-jks', bgScale:1, bodies:[], boreholes:[], masw:[], mikro:[], faults:[]
   };
@@ -634,6 +644,55 @@ function save(clean = false){
   }, 300);
 }
 const fById = id => state.formations.find(f => f.id === id);
+
+/* ---- Jeolojik yaş → milyon yıl (gençten yaşlıya sıralama için) ---- */
+const AGE_UNITS = [   // [kelime kalıbı, başlangıç (yaşlı), bitiş (genç)] Ma
+  [/^holosen$/, 0.0117, 0], [/^pleyi?stosen$|^pleistosen$/, 2.58, 0.0117], [/^kua?r?ter?ner$|^kuvaterner$/, 2.58, 0],
+  [/^pli[yi]?o(sen)?$/, 5.333, 2.58], [/^mi[yi]?osen$/, 23.03, 5.333], [/^neo[jg]en$/, 23.03, 2.58],
+  [/^oli[gğ]osen$/, 33.9, 23.03], [/^eosen$/, 56, 33.9], [/^paleosen$/, 66, 56], [/^paleo[jg]en$/, 66, 23.03],
+  [/^tersi?yer$/, 66, 2.58], [/^senozoyik$|^kenozoyik$/, 66, 0],
+  [/^kretase$|^kratese$/, 145, 66], [/^jura(sik)?$/, 201.4, 145], [/^tri?y?as$/, 251.9, 201.4], [/^me[sz]ozoyik$/, 251.9, 66],
+  [/^perm(iyen)?$/, 298.9, 251.9], [/^karbonifer$/, 358.9, 298.9], [/^devon(iyen)?$/, 419.2, 358.9], [/^sil[uü]r(iyen)?$/, 443.8, 419.2],
+  [/^ordovis(iyen)?$/, 485.4, 443.8], [/^kambri?yen$/, 538.8, 485.4], [/^paleozoyik$/, 538.8, 251.9],
+  [/^prekambri?yen$/, 2500, 538.8], [/^proterozoyik$/, 2500, 538.8], [/^arke[eo]?n$/, 4000, 2500]];
+const AGE_MOD = {erken:5/6, alt:5/6, orta:0.5, 'geç':1/6, gec:1/6, 'üst':1/6, ust:1/6};
+function ageMa(text){
+  const tok = String(text || '').toLocaleLowerCase('tr').split(/[^a-zçğıöşü]+/).filter(Boolean);
+  const vals = []; let mods = [];
+  for (const t of tok){
+    if (t in AGE_MOD){ mods.push(AGE_MOD[t]); continue; }
+    const u = AGE_UNITS.find(([re]) => re.test(t)); if (!u) continue;
+    const fr = mods.length ? mods.reduce((a, b) => a + b) / mods.length : 0.5;
+    vals.push(u[2] + (u[1] - u[2]) * fr); mods = [];
+  }
+  return vals.length ? vals.reduce((a, b) => a + b) / vals.length : null;
+}
+// Yaşa göre (gençten yaşlıya) kararlı sıralama; yaşı bilinmeyenler sona
+function sortByAge(list){
+  return list.map((f, i) => ({f, i, a:ageMa(f.age)})).sort((p, q) => (p.a === null) - (q.a === null) || (p.a ?? 0) - (q.a ?? 0) || p.i - q.i).map(o => o.f);
+}
+// Kesitte kullanılan formasyonlar, lejant sırasıyla. Aynı formasyon farklı renkle kullanıldıysa ayrı girdi.
+function legendForms(){
+  const out = [], seen = new Set();
+  const add = (id, color, scale) => {
+    const f = fById(id); if (!f) return;
+    const key = id + '|' + (color || '');
+    if (seen.has(key)) return; seen.add(key);
+    out.push({...effF(f, color), _scale:num(scale) || 1, _key:key});
+  };
+  state.bodies.forEach(b => b.fid === '__bg' ? add(state.bg, state.bgColor, state.bgScale) : add(b.fid, b.color, b.pscale));
+  add(state.bg, state.bgColor, state.bgScale);
+  const byAge = sortByAge(out), order = (state.legend && state.legend.order) || [];
+  if (!order.length) return byAge;
+  // Kullanıcı sırası; sırada olmayan yeni girdiler yaşına uygun yere girer
+  const res = order.map(k => out.find(f => f._key === k)).filter(Boolean);
+  for (const f of byAge){
+    if (res.includes(f)) continue;
+    const a = ageMa(f.age), j = a === null ? -1 : res.findIndex(g => { const b = ageMa(g.age); return b !== null && b > a; });
+    j < 0 ? res.push(f) : res.splice(j, 0, f);
+  }
+  return res;
+}
 
 /* ---- Geri al / Yinele (Ctrl+Z, Ctrl+Y) ----
    Her değişiklik grubundan önceki kesit saklanır. Sürükleme, yazı yazma gibi art arda gelen
@@ -1204,15 +1263,7 @@ function draw(canvas, s, edit = false){
 
   /* ---- Lejant yerleşimi (önce ölç) ---- */
   // Lejant girdileri: aynı formasyon farklı renklerle kullanıldıysa ayrı ayrı gösterilir
-  const usedF = [], seenF = new Set();
-  const addUse = (id, color, scale) => {
-    const f = fById(id); if (!f) return;
-    const key = id + '|' + (color || '');
-    if (seenF.has(key)) return; seenF.add(key);
-    usedF.push({...effF(f, color), _scale:num(scale) || 1});
-  };
-  state.bodies.forEach(b => b.fid === '__bg' ? addUse(state.bg, state.bgColor, state.bgScale) : addUse(b.fid, b.color, b.pscale));
-  addUse(state.bg, state.bgColor, state.bgScale);
+  const usedF = legendForms();
   const anyContact = m.polys.some(p => p.edges.length);
   const LI = LG.items || {};
   const sym = [];
@@ -1234,8 +1285,14 @@ function draw(canvas, s, edit = false){
   const fitW = w => Math.max(220, Math.min(w, innerW));
   const lineH = font => Math.round(parseInt(font.match(/(\d+)px/)[1], 10) * 1.35);
   const wrapLines = (spec, tw) => spec.filter(([t]) => t).flatMap(([t, font]) => wrapText(t, font, tw).map(l => [l, font]));
+  const stack = LG.layout !== 'akis', GAP = 40;
+  // Alt alta düzende iki sütun sığıyorsa semboller sağda, sığmıyorsa formasyonların altında
+  const symW0 = Math.min(440, Math.max(300, innerW * 0.4));
+  const twoCol = stack && sym.length && usedF.length && innerW - symW0 - GAP >= 380;
+  const symCW = twoCol ? symW0 : innerW;
+  const formCW = twoCol ? innerW - symCW - GAP : innerW;
   for (const f of usedF){
-    const w = fitW(600), tw = w - 120;
+    const w = stack ? formCW : fitW(600), tw = w - 120;
     const lines = [
       ...wrapLines([[[f.code, f.name].filter(Boolean).join('   '), 'bold 21px Arial']], tw),
       ...wrapLines([[f.desc, '18px Arial']], tw),
@@ -1253,13 +1310,21 @@ function draw(canvas, s, edit = false){
     fault:[[['Fay', '20px Arial']], 34, 2],
   };
   sym.forEach(k => {
-    const [spec, iconH, y0] = SYM[k], w = fitW(440);
+    const [spec, iconH, y0] = SYM[k], w = stack ? symCW : fitW(440);
     const lines = wrapLines(spec, w - 120);
     const h = Math.max(iconH, y0 + lines.reduce((a, [, ft]) => a + lineH(ft), 0));
     items.push({kind:k, w, h, lines, y0});
   });
   let cx = 0, cy = LG.title ? 46 : 0, rowH = 0;
-  items.forEach(it => {
+  if (stack){
+    const y0 = cy; let yf = y0, ys = y0;
+    items.forEach(it => {
+      if (it.kind === 'f'){ it.x = 0; it.y = yf; yf += it.h + 16; }
+      else if (twoCol){ it.x = innerW - symCW; it.y = ys; ys += it.h + 22; }
+      else { if (ys === y0) ys = yf > y0 ? yf + 10 : y0; it.x = 0; it.y = ys; ys += it.h + 22; }
+    });
+    cy = Math.max(yf - 16, ys - 22, y0); rowH = 0;
+  } else items.forEach(it => {
     if (cx > 0 && cx + it.w > innerW){ cx = 0; cy += rowH + 22; rowH = 0; }
     it.x = cx; it.y = cy; cx += it.w + 20; rowH = Math.max(rowH, it.h);
   });
@@ -1504,7 +1569,11 @@ function draw(canvas, s, edit = false){
   /* ---- Lejant ---- */
   if (LG.border !== false){ ctx.strokeStyle = '#000'; ctx.lineWidth = 2.5; ctx.strokeRect(legX, legY, legW, legH); }
   ctx.save(); ctx.translate(legX + pad, legY + pad); ctx.scale(LS, LS);
-  if (LG.title){ ctx.fillStyle = '#000'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText('LEJANT', 0, 0); }
+  if (LG.title){
+    const al = LG.titleAlign === 'orta' ? 'center' : LG.titleAlign === 'sag' ? 'right' : 'left';
+    ctx.fillStyle = '#000'; ctx.font = 'bold 26px Arial'; ctx.textAlign = al; ctx.textBaseline = 'top';
+    ctx.fillText('LEJANT', al === 'center' ? innerW / 2 : al === 'right' ? innerW : 0, 0);
+  }
   for (const it of items){
     const x = it.x, y = it.y;
     ctx.save();
@@ -2052,6 +2121,21 @@ function applyFilter(){
   panel.querySelectorAll('.frow').forEach(r => { r.style.display = !q || r.dataset.q.includes(q) ? '' : 'none'; });
 }
 
+function legOrderPanel(){
+  const L = legendForms();
+  if (!L.length) return '';
+  const custom = (state.legend.order || []).length > 0;
+  return `<h3>Formasyon sırası</h3>
+    <p class="hint">Lejantta yukarıdan aşağıya bu sırayla görünür. Okla ya da tutup sürükleyerek sıralayın.
+      ${custom ? 'Şu an <b>elle sıralı</b>.' : 'Şu an <b>yaşa göre</b> (gençten yaşlıya) sıralı.'}</p>
+    <div class="legord">${L.map((f, i) => `<div class="lgo" draggable="true" data-k="${esc(f._key)}">
+      <span class="grip" title="Tutup sürükleyin">⋮⋮</span><img class="sw" src="${swatchURL(f)}" alt="">
+      <div class="nm">${f.code ? '<b>' + esc(f.code) + '</b> ' : ''}${esc(f.name)}<small>${esc(f.age || 'yaş girilmemiş')}</small></div>
+      <button class="tool" data-action="legMv" data-i="${i}" data-d="-1" ${i ? '' : 'disabled'} title="Yukarı">▲</button>
+      <button class="tool" data-action="legMv" data-i="${i}" data-d="1" ${i < L.length - 1 ? '' : 'disabled'} title="Aşağı">▼</button></div>`).join('')}</div>
+    <button class="tool" data-action="legAge" style="width:100%;margin-top:6px">⏳ Yaşa göre sırala (gençten yaşlıya)</button>
+    <p class="hint" style="margin-top:4px">Yaş, Formasyonlar sekmesindeki <b>Yaş</b> alanından okunur (ör. Kuvaterner, Geç Miyosen, Orta - Geç Jura).</p>`;
+}
 function panelLegend(){
   const LG = state.legend, I = LG.items;
   const posBtn = (v, label, icon) => `<button class="${LG.pos === v ? 'tool on' : 'tool'}" data-action="legPos" data-v="${v}" style="flex:1;padding:10px">${icon}<br>${label}</button>`;
@@ -2064,7 +2148,15 @@ function panelLegend(){
     <h3>Görünüm</h3>
     ${scaleCtl('legend.scale', LG.scale, '🔤 Lejant boyutu', 0.5, 2.5)}
     ${chk('"LEJANT" başlığı göster', 'legend.title', LG.title)}
+    ${LG.title ? `<div class="row" style="margin:2px 0 8px;gap:6px;align-items:center"><span class="hint" style="margin:0;flex:none">Başlık hizası</span>
+      ${[['sol', '⬅ Sol'], ['orta', '↔ Orta'], ['sag', 'Sağ ➡']].map(([v, n]) => `<button class="${(LG.titleAlign || 'sol') === v ? 'tool on' : 'tool'}" data-action="legTitle" data-v="${v}" style="flex:1">${n}</button>`).join('')}</div>` : ''}
     ${chk('Çerçeve çiz', 'legend.border', LG.border !== false)}
+    <h3>Düzen</h3>
+    <div class="row" style="margin-top:0">
+      <button class="${LG.layout !== 'akis' ? 'tool on' : 'tool'}" data-action="legLayout" data-v="sutun" style="flex:1;padding:10px">▤ ┃ ≡<br>Alt alta<br><small>formasyonlar solda, semboller sağda</small></button>
+      <button class="${LG.layout === 'akis' ? 'tool on' : 'tool'}" data-action="legLayout" data-v="akis" style="flex:1;padding:10px">▤ ▤ ▤<br>Yan yana<br><small>sığdığı kadar sıralı</small></button>
+    </div>
+    ${legOrderPanel()}
     <h3>Lejantta gösterilecekler</h3>
     <p class="hint">Kesitte kullanılan formasyonlar lejanta otomatik eklenir. Aşağıdaki semboller kesitte varsa gösterilir.</p>
     ${chk('Mevcut Zemin Profili', 'legend.items.ground', I.ground !== false)}
@@ -2233,6 +2325,13 @@ document.addEventListener('click', e => {
     case 'resetScale': setPath(t.dataset.p, 1); break;
     case 'setColor': setPath(t.dataset.p, t.dataset.c || null); break;
     case 'legPos': state.legend.pos = t.dataset.v; ui.zoom = 0; break;
+    case 'legTitle': state.legend.titleAlign = t.dataset.v; break;
+    case 'legLayout': state.legend.layout = t.dataset.v; break;
+    case 'legAge': state.legend.order = []; toast('Formasyonlar gençten yaşlıya sıralandı'); break;
+    case 'legMv': {
+      const L = legendForms().map(f => f._key), j = i + +t.dataset.d; if (j < 0 || j >= L.length) return;
+      [L[i], L[j]] = [L[j], L[i]]; state.legend.order = L; break;
+    }
     case 'addBody': state.bodies.push({id:uid(), fid:state.formations[0].id, x1:null, x1b:null, x2:null, x2b:null, baseMode:'kesit', baseVal:null, basePts:'', geo:'yuzey', bx1:null, bx2:null, bz1:null, bz2:null}); break;
     case 'mvBody': { const j = i + +t.dataset.d; if (j < 0 || j >= state.bodies.length) return; [state.bodies[i], state.bodies[j]] = [state.bodies[j], state.bodies[i]]; break; }
     case 'fopen': if (e.target.closest('input,select,button')) return; ui.fopen = ui.fopen === t.dataset.id ? null : t.dataset.id; renderPanel(); return;
@@ -2279,6 +2378,23 @@ document.addEventListener('click', e => {
   }
   save(); renderPanel(); scheduleDraw();
 });
+
+// Lejant sırası: tutup sürükleme
+let legDrag = null;
+document.addEventListener('dragstart', e => { const r = e.target.closest && e.target.closest('.lgo'); if (!r) return; legDrag = r.dataset.k; r.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', legDrag); } catch(_){} });
+document.addEventListener('dragover', e => {
+  if (!legDrag) return; const r = e.target.closest && e.target.closest('.lgo'); if (!r) return;
+  e.preventDefault(); const b = r.getBoundingClientRect(), below = e.clientY > b.top + b.height / 2;
+  document.querySelectorAll('.lgo.over-t,.lgo.over-b').forEach(x => x.classList.remove('over-t', 'over-b'));
+  if (r.dataset.k !== legDrag) r.classList.add(below ? 'over-b' : 'over-t');
+});
+document.addEventListener('drop', e => {
+  if (!legDrag) return; const r = e.target.closest && e.target.closest('.lgo'); if (!r) return;
+  e.preventDefault(); const k = r.dataset.k, below = r.classList.contains('over-b');
+  const L = legendForms().map(f => f._key).filter(x => x !== legDrag), j = L.indexOf(k);
+  if (j >= 0 && k !== legDrag){ L.splice(below ? j + 1 : j, 0, legDrag); state.legend.order = L; save(); renderPanel(); scheduleDraw(); }
+});
+document.addEventListener('dragend', () => { legDrag = null; document.querySelectorAll('.lgo').forEach(x => x.classList.remove('dragging', 'over-t', 'over-b')); });
 
 document.getElementById('file').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
