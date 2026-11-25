@@ -1314,6 +1314,17 @@ function draw(canvas, s, edit = false){
     if (symPos === 'orta'){ symX = Math.max(380 + GAP, Math.round(innerW / 2 - symCW / 2)); formCW = symX - GAP; }
     else { symX = innerW - symCW; formCW = symX - GAP; }
   } else symCW = symPos === 'yanyana' ? fitW(440) : Math.min(innerW, 560);
+  // Izgara: gösterimler 2'şer / 3'er alt alta, bu sütunlar formasyonların sağında yan yana (sığmazsa alt satıra)
+  const gridR = stack && sym.length ? (symPos === 'grid2' ? 2 : symPos === 'grid3' ? 3 : 0) : 0;
+  let gridX = 0, gridW = innerW, gridCols = 1;
+  if (gridR){
+    if (usedF.length){
+      const fW = Math.min(620, Math.max(380, innerW * 0.4));
+      if (innerW - fW - GAP >= 300){ formCW = fW; gridX = fW + GAP; gridW = innerW - gridX; }
+    }
+    gridCols = Math.max(1, Math.min(Math.ceil(sym.length / gridR), Math.floor((gridW + 30) / 330)));
+    symCW = Math.min(440, (gridW - 30 * (gridCols - 1)) / gridCols);
+  }
   const symFlow = stack && !side && symPos === 'yanyana';
   for (const f of usedF){
     const w = stack ? formCW : fitW(600), tw = w - 120;
@@ -1347,7 +1358,19 @@ function draw(canvas, s, edit = false){
     items.forEach(it => { if (it.kind === 'f'){ it.x = 0; it.y = yf; yf += it.h + 16; } });
     const S = items.filter(it => it.kind !== 'f');
     let ys = side ? y0 : (yf > y0 ? yf + 10 : y0), end = ys;
-    if (symFlow){
+    if (gridR){
+      // Formasyonların sağında başlar; yer yoksa formasyonların altında. Aynı satırdaki gösterimler hizalı.
+      let by = gridX > 0 ? y0 : ys;
+      const per = gridCols * gridR;
+      for (let b0 = 0; b0 < S.length; b0 += per){
+        const band = S.slice(b0, b0 + per), rh = Array(gridR).fill(0);
+        band.forEach((it, j) => { const r = j % gridR; rh[r] = Math.max(rh[r], it.h); });
+        const ry = []; let acc = by; rh.forEach((h, r) => { ry[r] = acc; if (h > 0) acc += h + 22; });
+        band.forEach((it, j) => { it.x = gridX + Math.floor(j / gridR) * (symCW + 30); it.y = ry[j % gridR]; });
+        by = acc;
+      }
+      end = by;
+    } else if (symFlow){
       let sx = 0, rh = 0;
       S.forEach(it => {
         if (sx > 0 && sx + it.w > innerW){ sx = 0; ys += rh + 22; rh = 0; }
@@ -2443,7 +2466,7 @@ function panelLegend(){
     </div>
     ${LG.layout !== 'akis' ? `<div style="margin-top:8px"><span class="hint" style="margin:0">Diğer gösterimlerin yeri (zemin profili, sondaj, MASW…)</span>
       <div class="row" style="margin-top:4px;gap:6px;flex-wrap:wrap">
-      ${[['sag', '▤ ≡', 'Sağda alt alta'], ['orta', '▤ ≡ ·', 'Ortada alt alta'], ['alt', '▤<br>≡', 'Altta alt alta'], ['yanyana', '▤<br>▭ ▭ ▭', 'Altta yan yana']].map(([v, ic, n]) =>
+      ${[['sag', '▤ ≡', 'Sağda alt alta'], ['orta', '▤ ≡ ·', 'Ortada alt alta'], ['alt', '▤<br>≡', 'Altta alt alta'], ['yanyana', '▤<br>▭ ▭ ▭', 'Altta yan yana'], ['grid2', '▤ ⁚⁚⁚', "Sağda 2'li sütunlar"], ['grid3', '▤ ⋮⋮⋮', "Sağda 3'lü sütunlar"]].map(([v, ic, n]) =>
         `<button class="${(LG.symPos || 'sag') === v ? 'tool on' : 'tool'}" data-action="legSym" data-v="${v}" style="flex:1 1 45%;padding:8px">${ic}<br>${n}</button>`).join('')}
       </div>
       ${LG.pos === 'sag' && (LG.symPos || 'sag') !== 'alt' && (LG.symPos || 'sag') !== 'yanyana' ? '<p class="hint" style="margin-top:4px">Lejant dar olduğunda gösterimler sığmazsa formasyonların altına geçer. Genişliği artırarak yanlara alabilirsiniz.</p>' : ''}</div>` : ''}
