@@ -1654,7 +1654,7 @@ function draw(canvas, s, edit = false){
   for (const k of state.mikro){
     const ch = num(k.ch); if (ch === null) continue;
     const px = X(ch), py = Y(ground(ch));   // simge tam zemin çizgisinde
-    LBL.push([px - 17, py - 17, px + 17, py + 17], tBox(k.name || 'MİKRO', FT(16, 'mikro'), px, py - 20));
+    LBL.push([px - 17, py - 17, px + 17, py + 17]);   // yalnızca simge sabit; yazısı boş yere yerleşir
   }
   // Eğime göre döndürülmüş yazı grubu. items: [metin, yazı tipi, yerel y, hale kalınlığı]; r0: simgenin yarıçapı
   function placeRot(px, py, ang, items, col, r0){
@@ -1770,7 +1770,6 @@ function draw(canvas, s, edit = false){
     its.push([a.name || 'SİSMİK KIRILMA', fk, ly, 3 + tk]);
     placeRot(px, py, ang, its, KIR_C, 12);
   }
-  LTXT.forEach(fn => fn());   // MASW / ERT / sismik kırılma yazıları
   // Mikrotremör noktaları
   for (const k of state.mikro){
     const ch = num(k.ch); if (ch === null) continue;
@@ -1778,9 +1777,9 @@ function draw(canvas, s, edit = false){
     ctx.fillStyle = '#fff'; ctx.strokeStyle = '#2e9e44'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#2e9e44'; ctx.beginPath(); ctx.moveTo(px, py - 9); ctx.lineTo(px + 8.5, py + 6); ctx.lineTo(px - 8.5, py + 6); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#000'; ctx.font = FT(16, 'mikro'); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    halo(ctx, k.name || 'MİKRO', px, py - 20, 3 + TS('mikro'));
+    placeRot(px, py, 0, [[k.name || 'MİKRO', FT(16, 'mikro'), -20, 3 + TS('mikro')]], '#2e9e44', 16);
   }
+  LTXT.forEach(fn => fn());   // MASW / ERT / sismik kırılma / mikrotremör yazıları
   // Sondajlar
   for (const b of m.bhs){
     if (b.ch < m.xmin || b.ch > m.xmax) continue;
