@@ -1338,7 +1338,7 @@ function draw(canvas, s, edit = false){
   const SYM = {
     ground:[[['Mevcut Zemin Profili', '20px Arial']], 30, 0],
     contact:[[['Tahmini Jeolojik Sınır', 'bold 20px Arial'], [S.contactNote, 'italic 17px Arial']], 30, 0],
-    bh:[[['Sondaj Noktası', 'bold 20px Arial'], ['(Düşey ölçek abartılıdır)', 'bold 18px Arial'], ['(Vertical scale is exaggerated)', 'italic 17px Arial']], 96, 8],
+    bh:[[['Sondaj Noktası', 'bold 20px Arial']], 96, 42],
     masw:[[['MASW', 'bold 20px Arial'], ['Çok Kanallı Yüzey Dalgası Analizi', 'italic 17px Arial'], ['Çalışma Hattı', 'italic 17px Arial']], 30, 0],
     kirilma:[[['SİSMİK KIRILMA', 'bold 20px Arial'], ['Sismik Kırılma (P dalgası)', 'italic 17px Arial'], ['Çalışma Hattı', 'italic 17px Arial']], 30, 0],
     ert:[[['ERT', 'bold 20px Arial'], ['Elektrik Özdirenç Tomografisi', 'italic 17px Arial'], ['Çalışma Hattı', 'italic 17px Arial']], 30, 0],
@@ -1874,7 +1874,7 @@ function draw(canvas, s, edit = false){
       } else if (it.kind === 'bh'){
         ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText(m.bhs[0]?.name || 'SK', ix + 50, y - 4); ctx.textAlign = 'left';
         bhBox(ctx, ix + 50, y + 18, y + 90, null);
-        T('Sondaj Noktası', 8, 'bold 20px Arial'); T('(Düşey ölçek abartılıdır)', 36, 'bold 18px Arial'); T('(Vertical scale is exaggerated)', 64, 'italic 17px Arial');
+        
       } else if (it.kind === 'masw'){
         ctx.strokeStyle = '#6a2c91'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
         ctx.fillStyle = '#6a2c91'; ctx.beginPath(); ctx.arc(ix + 50, y + 12, 11, 0, Math.PI * 2); ctx.fill();
