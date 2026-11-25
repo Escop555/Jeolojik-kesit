@@ -127,6 +127,13 @@
   .pimp .hint{margin:0;font-size:11.5px}
   .piwrap{background:#f1f5f9;border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;justify-content:center}
   #piCv{display:block;touch-action:none}
+  .symhd{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+  .symprev{flex:1;min-width:0;width:100%;height:48px;border:1px solid #e2e8f0;border-radius:8px;background:#fff}
+  .shp{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12px;color:#475569}
+  .shp > span{margin-right:4px}
+  .shp .tool{padding:3px;line-height:0;background:#fff}
+  .shp .tool.on{background:#fff;outline:2px solid var(--accent);outline-offset:1px;box-shadow:none}
+  .shpprev{width:26px;height:26px}
   .bhst{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
   .bhst .tool{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;font-size:11.5px;line-height:1.15}
   .bhprev{width:22px;height:60px}
@@ -1108,18 +1115,89 @@ function halo(ctx, txt, x, y, w = 4){
   ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineWidth = w; ctx.lineJoin = 'round';
   ctx.strokeText(txt, x, y); ctx.restore(); ctx.fillText(txt, x, y);
 }
-const ERT_C = '#ef6c00', KIR_C = '#c2185b';
-function geophone(ctx, px, py){   // jeofon: hattın altına doğru küçük üçgen
-  ctx.save(); ctx.fillStyle = KIR_C; ctx.beginPath(); ctx.moveTo(px - 4.5, py + 2); ctx.lineTo(px + 4.5, py + 2); ctx.lineTo(px, py + 10); ctx.closePath(); ctx.fill(); ctx.restore();
+/* ---- Gösterim stilleri (Görünüm sekmesi) ----
+   state.sym.<tür> yalnızca kullanıcının değiştirdiği değerleri tutar; boş olanlar varsayılandan gelir. */
+const SYM_DEF = {
+  contact:{color:'#111111', w:3, dash:'kesik'},
+  masw:{color:'#6a2c91', shape:'daire', size:1, w:7, dash:'duz', edge:false},
+  ert:{color:'#ef6c00', shape:'elmas', size:1, w:5, dash:'duz', edge:true, ticks:true},
+  kirilma:{color:'#c2185b', shape:'kare', size:1, w:5, dash:'duz', edge:true, ticks:true},
+  mikro:{color:'#2e9e44', shape:'mikro', size:1},
+  gwl:{color:'#1565c0', w:2.5, dash:'kesik'},
+  fault:{color:'#c62828', w:4, dash:'duz'},
+};
+const SY = k => {
+  const o = {...SYM_DEF[k]}, u = ((typeof state !== 'undefined' && state && state.sym) || {})[k] || {};
+  for (const q in u) if (u[q] !== null && u[q] !== undefined && u[q] !== '') o[q] = u[q];
+  o.size = num(o.size) || 1; o.w = num(o.w) || SYM_DEF[k]?.w || 3;
+  return o;
+};
+const DASH_N = {duz:'Düz', kesik:'Kesikli', nokta:'Noktalı', kesiknokta:'Kesik-noktalı'};
+function dashOf(n, w, kesik){
+  if (n === 'kesik') return kesik || [14, 8];
+  if (n === 'nokta') return [0.1, Math.max(6, w * 2.4)];   // yuvarlak uçla nokta olur
+  if (n === 'kesiknokta') return [16, 6, 3, 6];
+  return [];
 }
-function kirMark(ctx, px, py){    // sismik kırılma hattı merkezi: beyaz kenarlı kare
-  ctx.save(); ctx.fillStyle = KIR_C; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.rect(px - 10, py - 10, 20, 20); ctx.fill(); ctx.stroke(); ctx.restore();
+function strokeSty(g, o, kesik){ g.strokeStyle = o.color; g.lineWidth = o.w; g.setLineDash(dashOf(o.dash, o.w, kesik)); g.lineCap = o.dash === 'nokta' ? 'round' : 'butt'; }
+function groundSty(){
+  const p = GROUND_STYLES[state.settings.groundStyle] || GROUND_STYLES.red, o = (state.sym || {}).ground || {};
+  const w = num(o.w) || p.w;
+  return {color:o.color || p.color, w, dash:o.dash ? dashOf(o.dash, w, [14, 8]) : p.dash, cap:o.dash === 'nokta' ? 'round' : 'butt'};
 }
-function ertMark(ctx, px, py){   // ERT hattı merkezi: beyaz kenarlı eşkenar dörtgen
-  ctx.save(); ctx.fillStyle = ERT_C; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(px, py - 12); ctx.lineTo(px + 12, py); ctx.lineTo(px, py + 12); ctx.lineTo(px - 12, py); ctx.closePath(); ctx.fill(); ctx.stroke();
-  ctx.restore();
+const SHAPES = {daire:'Daire', kare:'Kare', elmas:'Elmas', ucgen:'Üçgen', yildiz:'Yıldız', altigen:'Altıgen', halka:'Halka', mikro:'Halka + üçgen', yok:'Simge yok'};
+// Ölçüm simgesi: r yarıçap, edge beyaz kenar
+function drawMark(g, shape, px, py, r, col, edge){
+  if (shape === 'yok') return;
+  g.save(); g.setLineDash([]); g.lineJoin = 'miter'; g.beginPath();
+  if (shape === 'halka' || shape === 'mikro'){
+    const k = r / 14;
+    g.arc(px, py, r, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill(); g.strokeStyle = col; g.lineWidth = 3 * k; g.stroke();
+    g.fillStyle = col; g.beginPath();
+    if (shape === 'mikro'){ g.moveTo(px, py - 9 * k); g.lineTo(px + 8.5 * k, py + 6 * k); g.lineTo(px - 8.5 * k, py + 6 * k); g.closePath(); }
+    else g.arc(px, py, 4 * k, 0, Math.PI * 2);
+    g.fill(); g.restore(); return;
+  }
+  const poly = q => q.forEach(([a, b], i) => i ? g.lineTo(px + a, py + b) : g.moveTo(px + a, py + b)), P = [];
+  if (shape === 'kare'){ const h = r * 0.83; g.rect(px - h, py - h, 2 * h, 2 * h); }
+  else if (shape === 'elmas') poly([[0, -r], [r, 0], [0, r], [-r, 0]]);
+  else if (shape === 'ucgen') poly([[0, -r * 1.1], [r * 1.05, r * 0.72], [-r * 1.05, r * 0.72]]);
+  else if (shape === 'yildiz'){ for (let i = 0; i < 10; i++){ const a = -Math.PI / 2 + i * Math.PI / 5, q = i % 2 ? r * 0.5 : r * 1.18; P.push([q * Math.cos(a), q * Math.sin(a)]); } poly(P); }
+  else if (shape === 'altigen'){ for (let i = 0; i < 6; i++){ const a = i * Math.PI / 3; P.push([r * Math.cos(a), r * Math.sin(a)]); } poly(P); }
+  else g.arc(px, py, r, 0, Math.PI * 2);
+  g.closePath(); g.fillStyle = col; g.fill();
+  if (edge){ g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke(); }
+  g.restore();
+}
+function geophone(ctx, px, py, col){   // jeofon: hattın altına doğru küçük üçgen
+  ctx.save(); ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(px - 4.5, py + 2); ctx.lineTo(px + 4.5, py + 2); ctx.lineTo(px, py + 10); ctx.closePath(); ctx.fill(); ctx.restore();
+}
+// Lejant / önizleme örneği: (ix, y) sol üst, W genişlik
+function symSample(g, kind, ix, y, W = 100){
+  g.save();
+  const line = yy => { g.beginPath(); g.moveTo(ix, yy); g.lineTo(ix + W, yy); g.stroke(); }, cx = ix + W / 2;
+  if (kind === 'ground'){ const gs = groundSty(); g.strokeStyle = gs.color; g.lineWidth = gs.w; g.setLineDash(gs.dash); g.lineCap = gs.cap; line(y + 12); }
+  else if (kind === 'contact'){ strokeSty(g, SY('contact'), [12, 8]); line(y + 12); }
+  else if (kind === 'masw'){
+    const o = SY('masw'); strokeSty(g, o); g.lineWidth = Math.min(o.w, 10) * 6 / 7; line(y + 12);
+    drawMark(g, o.shape, cx, y + 12, 11 * Math.min(o.size, 1.4), o.color, o.edge);
+  } else if (kind === 'ert' || kind === 'kirilma'){
+    const o = SY(kind); strokeSty(g, o); g.lineWidth = Math.min(o.w, 10); line(y + 12);
+    if (o.ticks){
+      g.setLineDash([]); g.strokeStyle = o.color; g.lineWidth = 2.5; g.lineCap = 'butt';
+      const n = Math.max(6, Math.round(W / 15));
+      for (let k = 0; k <= n; k++){
+        const px = ix + k * W / n;
+        if (kind === 'ert'){ g.beginPath(); g.moveTo(px, y + 5); g.lineTo(px, y + 19); g.stroke(); } else geophone(g, px, y + 12, o.color);
+      }
+    }
+    drawMark(g, o.shape, cx, y + 12, 12 * Math.min(o.size, 1.4), o.color, o.edge);
+  } else if (kind === 'mikro'){ const o = SY('mikro'); drawMark(g, o.shape, cx, y + 16, 14 * Math.min(o.size, 1.3), o.color, true); }
+  else if (kind === 'gwl'){
+    const o = SY('gwl'); strokeSty(g, o, [14, 7]); line(y + 20); g.setLineDash([]);
+    g.fillStyle = o.color; g.beginPath(); g.moveTo(cx - 9, y + 2); g.lineTo(cx + 9, y + 2); g.lineTo(cx, y + 16); g.closePath(); g.fill();
+  } else if (kind === 'fault'){ strokeSty(g, SY('fault'), [18, 8]); g.beginPath(); g.moveTo(cx - 15, y + 30); g.lineTo(cx + 15, y - 2); g.stroke(); }
+  g.restore();
 }
 const GROUND_STYLES = {
   red:{color:'#c0392b', dash:[14,8], w:3, label:'Kırmızı kesikli'},
@@ -1551,7 +1629,7 @@ function draw(canvas, s, edit = false){
     }
     return false;
   };
-  ctx.strokeStyle = '#111'; ctx.lineWidth = 3; ctx.setLineDash([12, 8]);
+  strokeSty(ctx, SY('contact'), [12, 8]);
   m.polys.forEach((p, i) => p.edges.forEach(e => {
     const S2 = e.map(([x, y]) => [X(x), Y(y)]);
     let run = null, cum = 0;
@@ -1576,20 +1654,22 @@ function draw(canvas, s, edit = false){
     }
     flush();
   }));
-  ctx.setLineDash([]); ctx.lineDashOffset = 0;
+  ctx.setLineDash([]); ctx.lineDashOffset = 0; ctx.lineCap = 'butt';
   // Faylar
+  const FO = SY('fault');
   for (const f of state.faults){
     const ch = num(f.ch); if (ch === null) continue;
     const chb = num(f.chb) ?? ch;
-    ctx.strokeStyle = '#c62828'; ctx.lineWidth = 4;
+    strokeSty(ctx, FO, [18, 8]);
     ctx.beginPath(); ctx.moveTo(X(ch), Y(ground(ch))); ctx.lineTo(X(chb), Y(m.base)); ctx.stroke();
   }
+  ctx.setLineDash([]); ctx.lineCap = 'butt';
   // YASS çizgisi
   const gp = m.bhs.filter(b => b.gwl !== null).map(b => [b.ch, b.elev - b.gwl]).sort((a, b) => a[0] - b[0]);
   if (gp.length){
     const pts = gp.length === 1 ? [[m.xmin, gp[0][1]], [m.xmax, gp[0][1]]] : [[m.xmin, gp[0][1]], ...gp, [m.xmax, gp[gp.length-1][1]]];
-    ctx.strokeStyle = '#1565c0'; ctx.lineWidth = 2.5; ctx.setLineDash([14, 7]);
-    ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1]))); ctx.stroke(); ctx.setLineDash([]);
+    strokeSty(ctx, SY('gwl'), [14, 7]);
+    ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1]))); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt';
   }
   ctx.restore();
 
@@ -1627,8 +1707,8 @@ function draw(canvas, s, edit = false){
   if (S.showCodes) placeCodes(ctx, m, X, Y, ml, mt, plotW, plotH, 28 * TS('code'));
 
   // Zemin profili
-  const gs = GROUND_STYLES[S.groundStyle] || GROUND_STYLES.red;
-  ctx.strokeStyle = gs.color; ctx.lineWidth = gs.w; ctx.setLineDash(gs.dash); groundLine(); ctx.stroke(); ctx.setLineDash([]);
+  const gs = groundSty();
+  ctx.strokeStyle = gs.color; ctx.lineWidth = gs.w; ctx.setLineDash(gs.dash); ctx.lineCap = gs.cap; groundLine(); ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt';
 
   /* ---- Yazı çakışma önleme ----
      Sondaj kutucukları ve yazıları, mikrotremör simgeleri ve fay etiketleri yerinde kalır (önce kaydedilir).
@@ -1652,7 +1732,8 @@ function draw(canvas, s, edit = false){
   for (const k of state.mikro){
     const ch = num(k.ch); if (ch === null) continue;
     const px = X(ch), py = Y(ground(ch));   // simge tam zemin çizgisinde
-    LBL.push([px - 17, py - 17, px + 17, py + 17]);   // yalnızca simge sabit; yazısı boş yere yerleşir
+    const rr = SY('mikro').shape === 'yok' ? 4 : 17 * SY('mikro').size;
+    LBL.push([px - rr, py - rr, px + rr, py + rr]);   // yalnızca simge sabit; yazısı boş yere yerleşir
   }
   // Eğime göre döndürülmüş yazı grubu. items: [metin, yazı tipi, yerel y, hale kalınlığı]; r0: simgenin yarıçapı
   function placeRot(px, py, ang, items, col, r0){
@@ -1689,29 +1770,31 @@ function draw(canvas, s, edit = false){
   // Fay etiketleri
   for (const f of state.faults){
     const ch = num(f.ch); if (ch === null || !f.label) continue;
-    ctx.fillStyle = '#c62828'; ctx.font = FT(22, 'fault'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillStyle = FO.color; ctx.font = FT(22, 'fault'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
     halo(ctx, f.label, X(ch), Y(ground(ch)) - 8);
     LBL.push(tBox(f.label, FT(22, 'fault'), X(ch), Y(ground(ch)) - 8, 'bottom'));
   }
 
   // MASW hatları
+  const MA = SY('masw'), rMA = 12 * MA.size, liftMA = MA.shape === 'yok' ? -6 : Math.max(0, rMA - 12);
   for (const a of state.masw){
     const ch = num(a.ch); if (ch === null) continue;
     const L = Math.max(0, num(a.len) ?? 100);
     const x0 = Math.max(m.xmin, ch - L/2), x1 = Math.min(m.xmax, ch + L/2);
     const xs = [x0, ...m.gxs.filter(x => x > x0 && x < x1), x1];
-    ctx.strokeStyle = '#6a2c91'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    strokeSty(ctx, MA); if (MA.dash === 'duz') ctx.lineCap = 'round';
     ctx.beginPath(); xs.forEach((x, i) => i ? ctx.lineTo(X(x), Y(ground(x)) - 2) : ctx.moveTo(X(x), Y(ground(x)) - 2)); ctx.stroke();
-    ctx.lineCap = 'butt';
+    ctx.setLineDash([]); ctx.lineCap = 'butt';
     const px = X(ch), py = Y(ground(ch));
-    ctx.fillStyle = '#6a2c91'; ctx.beginPath(); ctx.arc(px, py - 2, 12, 0, Math.PI * 2); ctx.fill();
+    drawMark(ctx, MA.shape, px, py - 2, rMA, MA.color, MA.edge);
     const ang = Math.atan2(Y(ground(x1)) - Y(ground(x0)), X(x1) - X(x0));
     const tm = TS('masw'), fm = FT(17, 'masw'), its = [];
-    if (num(a.vs) !== null) its.push(['Vs(30) Hızı: ' + a.vs, fm, -18 - 24 * tm, 3 + tm]);
-    its.push([a.name || 'MASW', fm, -18 - 2 * tm, 3 + tm]);
-    placeRot(px, py, ang, its, '#6a2c91', 14);
+    if (num(a.vs) !== null) its.push(['Vs(30) Hızı: ' + a.vs, fm, -18 - liftMA - 24 * tm, 3 + tm]);
+    its.push([a.name || 'MASW', fm, -18 - liftMA - 2 * tm, 3 + tm]);
+    placeRot(px, py, ang, its, MA.color, Math.max(4, rMA + 2));
   }
   // ERT hatları (Elektrik Özdirenç Tomografisi)
+  const EO = SY('ert'), rEO = 12 * EO.size, liftEO = EO.shape === 'yok' ? -4 : Math.max(0, rEO - 12);
   for (const a of (state.ert || [])){
     const ch = num(a.ch); if (ch === null) continue;
     const L = Math.max(0, num(a.len) ?? 200);
@@ -1721,26 +1804,27 @@ function draw(canvas, s, edit = false){
     const ov = state.masw.some(w => { const c = num(w.ch); if (c === null) return false; const l = Math.max(0, num(w.len) ?? 100); return c - l / 2 < x1 && c + l / 2 > x0; });
     const off = ov ? -9 : 2, gy = x => Y(ground(x)) - off;
     const xs = [x0, ...m.gxs.filter(x => x > x0 && x < x1), x1];
-    ctx.strokeStyle = ERT_C; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    strokeSty(ctx, EO); if (EO.dash === 'duz') ctx.lineCap = 'round';
     ctx.beginPath(); xs.forEach((x, i) => i ? ctx.lineTo(X(x), gy(x)) : ctx.moveTo(X(x), gy(x))); ctx.stroke();
-    ctx.lineCap = 'butt';
+    ctx.setLineDash([]); ctx.lineCap = 'butt';
     // Elektrotlar: girilen aralıkla (çok sıksa okunur bir sıklıkta)
     const sp = num(a.sp), pxL = X(x1) - X(x0);
     let n = sp && sp > 0 ? Math.round((x1 - x0) / sp) : 0;
     if (!n || pxL / n < 9) n = Math.max(2, Math.floor(pxL / 14));
     ctx.lineWidth = 2.5;
-    for (let k = 0; k <= n; k++){ const x = x0 + (x1 - x0) * k / n, px = X(x), py = gy(x); ctx.beginPath(); ctx.moveTo(px, py - 7); ctx.lineTo(px, py + 7); ctx.stroke(); }
+    if (EO.ticks) for (let k = 0; k <= n; k++){ const x = x0 + (x1 - x0) * k / n, px = X(x), py = gy(x); ctx.beginPath(); ctx.moveTo(px, py - 7); ctx.lineTo(px, py + 7); ctx.stroke(); }
     const cx = Math.min(Math.max(ch, x0), x1), px = X(cx), py = gy(cx);
-    ertMark(ctx, px, py);
+    drawMark(ctx, EO.shape, px, py, rEO, EO.color, EO.edge);
     const ang = Math.atan2(gy(x1) - gy(x0), X(x1) - X(x0));
-    const te = TS('ert'), fe = FT(17, 'ert'), ly = (ov ? -9 : 0) - 18 - 2 * te, its = [];
+    const te = TS('ert'), fe = FT(17, 'ert'), ly = (ov ? -9 : 0) - 18 - liftEO - 2 * te, its = [];
     if (sp) its.push(['Elektrot aralığı: ' + a.sp + ' m', fe, ly - 22 * te, 3 + te]);
     its.push([a.name || 'ERT', fe, ly, 3 + te]);
-    placeRot(px, py, ang, its, ERT_C, 13);
+    placeRot(px, py, ang, its, EO.color, Math.max(4, rEO + 1));
   }
   // Sismik kırılma hatları
   const spanOf = (a, def) => { const c = num(a.ch); if (c === null) return null; const l = Math.max(0, num(a.len) ?? def); return [Math.max(m.xmin, c - l / 2), Math.min(m.xmax, c + l / 2)]; };
   const ertOff = a => { const r = spanOf(a, 200); return r && state.masw.some(w => { const q = spanOf(w, 100); return q && q[0] < r[1] && q[1] > r[0]; }) ? -9 : 2; };
+  const KO = SY('kirilma'), rKO = 12 * KO.size, liftKO = KO.shape === 'yok' ? -4 : Math.max(0, rKO - 12);
   for (const a of (state.kirilma || [])){
     const ch = num(a.ch); if (ch === null) continue;
     const r = spanOf(a, 200), [x0, x1] = r; if (!(x1 > x0)) continue;
@@ -1750,33 +1834,32 @@ function draw(canvas, s, edit = false){
     (state.ert || []).forEach(w => { const q = spanOf(w, 200); if (q && q[0] < x1 && q[1] > x0) used.add(ertOff(w)); });
     const off = [2, -9, -20, -31].find(o => !used.has(o)) ?? -31, gy = x => Y(ground(x)) - off;
     const xs = [x0, ...m.gxs.filter(x => x > x0 && x < x1), x1];
-    ctx.strokeStyle = KIR_C; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    strokeSty(ctx, KO); if (KO.dash === 'duz') ctx.lineCap = 'round';
     ctx.beginPath(); xs.forEach((x, i) => i ? ctx.lineTo(X(x), gy(x)) : ctx.moveTo(X(x), gy(x))); ctx.stroke();
-    ctx.lineCap = 'butt';
+    ctx.setLineDash([]); ctx.lineCap = 'butt';
     // Jeofonlar: girilen aralıkla (çok sıksa okunur bir sıklıkta)
     const sp = num(a.sp), pxL = X(x1) - X(x0);
     let n = sp && sp > 0 ? Math.round((x1 - x0) / sp) : 0;
     if (!n || pxL / n < 10) n = Math.max(2, Math.floor(pxL / 16));
-    for (let k = 0; k <= n; k++){ const x = x0 + (x1 - x0) * k / n; geophone(ctx, X(x), gy(x)); }
+    if (KO.ticks) for (let k = 0; k <= n; k++){ const x = x0 + (x1 - x0) * k / n; geophone(ctx, X(x), gy(x), KO.color); }
     const cx = Math.min(Math.max(ch, x0), x1), px = X(cx), py = gy(cx);
-    kirMark(ctx, px, py);
+    drawMark(ctx, KO.shape, px, py, rKO, KO.color, KO.edge);
     const ang = Math.atan2(gy(x1) - gy(x0), X(x1) - X(x0));
-    const tk = TS('kirilma'), fk = FT(17, 'kirilma'), ly = (off - 2) - 18 - 2 * tk, its = [];
+    const tk = TS('kirilma'), fk = FT(17, 'kirilma'), ly = (off - 2) - 18 - liftKO - 2 * tk, its = [];
     const extra = [];
     if (num(a.vp) !== null) extra.push('Vp: ' + a.vp + ' m/s');
     if (sp) extra.push('Jeofon aralığı: ' + a.sp + ' m');
     extra.reverse().forEach((t, i) => its.push([t, fk, ly - 22 * tk * (i + 1), 3 + tk]));
     its.push([a.name || 'SİSMİK KIRILMA', fk, ly, 3 + tk]);
-    placeRot(px, py, ang, its, KIR_C, 12);
+    placeRot(px, py, ang, its, KO.color, Math.max(4, rKO));
   }
   // Mikrotremör noktaları
+  const MK = SY('mikro'), rMK = 14 * MK.size, liftMK = MK.shape === 'yok' ? -8 : Math.max(0, rMK - 14);
   for (const k of state.mikro){
     const ch = num(k.ch); if (ch === null) continue;
     const px = X(ch), py = Y(ground(ch));   // simge tam zemin çizgisinde
-    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#2e9e44'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#2e9e44'; ctx.beginPath(); ctx.moveTo(px, py - 9); ctx.lineTo(px + 8.5, py + 6); ctx.lineTo(px - 8.5, py + 6); ctx.closePath(); ctx.fill();
-    placeRot(px, py, 0, [[k.name || 'MİKRO', FT(16, 'mikro'), -20, 3 + TS('mikro')]], '#2e9e44', 16);
+    drawMark(ctx, MK.shape, px, py, rMK, MK.color, true);
+    placeRot(px, py, 0, [[k.name || 'MİKRO', FT(16, 'mikro'), -20 - liftMK, 3 + TS('mikro')]], MK.color, Math.max(4, rMK + 2));
   }
   LTXT.forEach(fn => fn());   // MASW / ERT / sismik kırılma / mikrotremör yazıları
   // Sondajlar
@@ -1792,7 +1875,7 @@ function draw(canvas, s, edit = false){
     ctx.font = FT(22, 'bh'); halo(ctx, b.name || 'SK', x, ly, 3 + tb);
     if (b.gwl !== null){
       const gy = Y(b.elev - b.gwl), gx = x + 24;
-      ctx.fillStyle = '#1565c0'; ctx.beginPath(); ctx.moveTo(gx - 9, gy - 14); ctx.lineTo(gx + 9, gy - 14); ctx.lineTo(gx, gy - 1); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = SY('gwl').color; ctx.beginPath(); ctx.moveTo(gx - 9, gy - 14); ctx.lineTo(gx + 9, gy - 14); ctx.lineTo(gx, gy - 1); ctx.closePath(); ctx.fill();
       ctx.font = FT(15, 'bh'); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; halo(ctx, b.gwl + ' m', gx + 13, gy - 8, 3 + tb);
     }
   }
@@ -1863,43 +1946,10 @@ function draw(canvas, s, edit = false){
       const ix = x;
       let ty = y + it.y0;
       it.lines.forEach(([l, ft]) => { ctx.font = ft; ctx.fillStyle = '#000'; ctx.fillText(l, x + 120, ty); ty += lineH(ft); });
-      const T = () => {};
-      if (it.kind === 'ground'){
-        ctx.strokeStyle = gs.color; ctx.lineWidth = gs.w; ctx.setLineDash(gs.dash); ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
-        T('Mevcut Zemin Profili', 0, '20px Arial');
-      } else if (it.kind === 'contact'){
-        ctx.strokeStyle = '#111'; ctx.lineWidth = 3; ctx.setLineDash([12, 8]); ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
-        T('Tahmini Jeolojik Sınır', 0, 'bold 20px Arial');
-        wrapText(S.contactNote, 'italic 17px Arial', 300).forEach((l, i) => T(l, 30 + i * 24, 'italic 17px Arial'));
-      } else if (it.kind === 'bh'){
+      if (it.kind === 'bh'){
         ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText(m.bhs[0]?.name || 'SK', ix + 50, y - 4); ctx.textAlign = 'left';
         bhBox(ctx, ix + 50, y + 18, y + 90, null);
-        
-      } else if (it.kind === 'masw'){
-        ctx.strokeStyle = '#6a2c91'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
-        ctx.fillStyle = '#6a2c91'; ctx.beginPath(); ctx.arc(ix + 50, y + 12, 11, 0, Math.PI * 2); ctx.fill();
-        T('MASW', 0, 'bold 20px Arial'); T('Çok Kanallı Yüzey Dalgası Analizi', 28, 'italic 17px Arial'); T('Çalışma Hattı', 52, 'italic 17px Arial');
-      } else if (it.kind === 'ert'){
-        ctx.strokeStyle = ERT_C; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
-        ctx.lineWidth = 2.5; for (let k = 0; k <= 7; k++){ const px = ix + k * 100 / 7; ctx.beginPath(); ctx.moveTo(px, y + 5); ctx.lineTo(px, y + 19); ctx.stroke(); }
-        ertMark(ctx, ix + 50, y + 12);
-      } else if (it.kind === 'kirilma'){
-        ctx.strokeStyle = KIR_C; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
-        for (let k = 0; k <= 6; k++) geophone(ctx, ix + k * 100 / 6, y + 12);
-        kirMark(ctx, ix + 50, y + 12);
-      } else if (it.kind === 'mikro'){
-        const px = ix + 50, py = y + 16;
-        ctx.fillStyle = '#fff'; ctx.strokeStyle = '#2e9e44'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = '#2e9e44'; ctx.beginPath(); ctx.moveTo(px, py - 9); ctx.lineTo(px + 8.5, py + 6); ctx.lineTo(px - 8.5, py + 6); ctx.closePath(); ctx.fill();
-        T('MİKRO', 0, 'bold 20px Arial'); T('Mikrotremör (HVSR)', 28, 'italic 17px Arial'); T('Çalışma Noktası', 52, 'italic 17px Arial');
-      } else if (it.kind === 'gwl'){
-        ctx.strokeStyle = '#1565c0'; ctx.lineWidth = 2.5; ctx.setLineDash([14, 7]); ctx.beginPath(); ctx.moveTo(ix, y + 20); ctx.lineTo(ix + 100, y + 20); ctx.stroke(); ctx.setLineDash([]);
-        ctx.fillStyle = '#1565c0'; ctx.beginPath(); ctx.moveTo(ix + 41, y + 2); ctx.lineTo(ix + 59, y + 2); ctx.lineTo(ix + 50, y + 16); ctx.closePath(); ctx.fill();
-        T('Yeraltı Su Seviyesi (YASS)', 4, '20px Arial');
-      } else if (it.kind === 'fault'){
-        ctx.strokeStyle = '#c62828'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(ix + 35, y + 30); ctx.lineTo(ix + 65, y - 2); ctx.stroke();
-        T('Fay', 2, '20px Arial');
-      }
+      } else symSample(ctx, it.kind, ix, y);
     }
     ctx.restore();
   }
@@ -2150,7 +2200,7 @@ window.addEventListener('resize', applyZoom);
 /* =========================================================
    PANEL
    ========================================================= */
-const TABS = [['kesit','Kesit'], ['noktalar','Sondaj & Ölçüm'], ['formasyon','Formasyonlar'], ['lejant','Lejant'], ['ayar','Ayarlar']];
+const TABS = [['kesit','Kesit'], ['noktalar','Sondaj & Ölçüm'], ['gorunum','Görünüm'], ['formasyon','Formasyonlar'], ['lejant','Lejant'], ['ayar','Ayarlar']];
 const panel = document.getElementById('panel');
 let panelT;
 function schedulePanel(force){ clearTimeout(panelT); panelT = setTimeout(() => { if (force || !panel.contains(document.activeElement)) renderPanel(); }, 150); }
@@ -2201,11 +2251,11 @@ function renderTabs(){
 }
 function renderPanel(){
   renderTabs(); renderTools();
-  const h = ui.tab === 'kesit' ? panelSection() : ui.tab === 'noktalar' ? panelPoints() : ui.tab === 'formasyon' ? panelFormations()
+  const h = ui.tab === 'kesit' ? panelSection() : ui.tab === 'noktalar' ? panelPoints() : ui.tab === 'gorunum' ? panelStyle() : ui.tab === 'formasyon' ? panelFormations()
           : ui.tab === 'lejant' ? panelLegend() : panelSettings();
   const st = panel.scrollTop; panel.innerHTML = h; sectionize(); panel.scrollTop = st;
   if (ui.tab === 'formasyon') applyFilter();
-  if (ui.tab === 'noktalar') drawBhPreviews();
+  if (ui.tab === 'gorunum'){ drawBhPreviews(); drawSymPreviews(); }
   if (ui.lastTab !== ui.tab){
     ui.lastTab = ui.tab; panel.scrollTop = 0;
     panel.classList.remove('fade'); void panel.offsetWidth; panel.classList.add('fade');
@@ -2382,8 +2432,65 @@ function drawBhPreviews(){
     g.strokeStyle = '#000'; g.lineWidth = 1.5; g.strokeRect(x0, y0, w, h);
   });
 }
+const SYM_COLORS = [['#6a2c91', 'Mor'], ['#ef6c00', 'Turuncu'], ['#c2185b', 'Pembe'], ['#2e9e44', 'Yeşil'], ['#1565c0', 'Mavi'],
+                    ['#c62828', 'Kırmızı'], ['#00838f', 'Turkuaz'], ['#f9a825', 'Sarı'], ['#5d4037', 'Kahverengi'], ['#111111', 'Siyah']];
+const symColorCtl = (path, col) => `<div class="clr"><span>Renk</span>
+    <input type="color" data-path="${path}" data-rr="1" value="${esc(col)}" title="Renk seç">
+    <div class="pre">${SYM_COLORS.map(([c, n]) => `<button class="dot${String(col).toLowerCase() === c ? ' on' : ''}" style="background:${c}" title="${n}" data-action="setColor" data-p="${path}" data-c="${c}"></button>`).join('')}</div></div>`;
+const rangeCtl = (label, path, v, min, max, step, u) => `<div class="scl"><span>${label}</span>
+    <input type="range" min="${min}" max="${max}" step="${step}" data-path="${path}" data-u="${u}" value="${v}"><b class="sv">${v}${u}</b><span></span></div>`;
+const dashCtl = (path, cur, extra = []) => `<div class="grid" style="margin-top:8px"><label>Çizgi tipi${sel(path, [...extra, ...Object.entries(DASH_N)], cur)}</label></div>`;
+const symHead = (k, title, reset = true) => `<h3>${title}</h3>
+    <div class="symhd"><canvas class="symprev" data-k="${k}"></canvas>${reset ? `<button class="sm" data-action="symReset" data-k="${k}" title="Varsayılan görünüme dön">↺ Varsayılan</button>` : ''}</div>`;
+function symBlock(k, title, o2 = {}){
+  const o = SY(k);
+  let h = symHead(k, title) + symColorCtl(`sym.${k}.color`, o.color);
+  if (o2.shapes) h += `<div class="shp"><span>Şekil</span>${o2.shapes.map(v => `<button class="${o.shape === v ? 'tool on' : 'tool'}" data-action="symSet" data-k="${k}" data-f="shape" data-v="${v}" title="${SHAPES[v]}"><canvas class="shpprev" data-k="${k}" data-shape="${v}"></canvas></button>`).join('')}</div>`
+    + (o.shape === 'yok' ? '' : scaleCtl(`sym.${k}.size`, o.size, 'Simge boyutu', 0.5, 2.5));
+  if (o2.line) h += dashCtl(`sym.${k}.dash`, o.dash) + rangeCtl('Çizgi kalınlığı', `sym.${k}.w`, o.w, 1, o2.maxW || 14, 0.5, ' px');
+  if (o2.edge && o.shape !== 'yok' && o.shape !== 'halka' && o.shape !== 'mikro') h += `<div style="margin-top:6px">${chk('Simgede beyaz kenar', `sym.${k}.edge`, o.edge)}</div>`;
+  if (o2.ticks) h += `<div style="margin-top:4px">${chk(o2.ticks, `sym.${k}.ticks`, o.ticks)}</div>`;
+  return h;
+}
+function panelStyle(){
+  const S = state.settings, go = (state.sym || {}).ground || {}, gs = groundSty(), custom = ['color', 'w', 'dash'].some(q => go[q]);
+  const SH = ['daire', 'kare', 'elmas', 'ucgen', 'yildiz', 'altigen', 'halka', 'mikro', 'yok'];
+  return `<p class="hint">Kesitteki gösterimlerin renk, şekil ve çizgi görünümü. Değişiklikler kesitte ve lejantta birlikte uygulanır, kesitle birlikte kaydedilir.</p>`
+    + bhStylePanel()
+    + symHead('ground', 'Zemin profili', false)
+    + `<div class="row" style="margin-top:0;flex-wrap:wrap">${Object.entries(GROUND_STYLES).map(([k, v]) => `<button class="${S.groundStyle === k && !custom ? 'tool on' : 'tool'}" data-action="groundPreset" data-v="${k}">${v.label}</button>`).join('')}</div>`
+    + symColorCtl('sym.ground.color', gs.color)
+    + dashCtl('sym.ground.dash', go.dash || '', [['', 'Hazır stildeki']])
+    + rangeCtl('Çizgi kalınlığı', 'sym.ground.w', gs.w, 1, 10, 0.5, ' px')
+    + symBlock('contact', 'Tahmini jeolojik sınır', {line:true, maxW:8})
+    + symBlock('masw', 'MASW hatları', {shapes:SH, line:true, edge:true})
+    + symBlock('ert', 'ERT hatları', {shapes:SH, line:true, edge:true, ticks:'Elektrotları göster'})
+    + symBlock('kirilma', 'Sismik kırılma hatları', {shapes:SH, line:true, edge:true, ticks:'Jeofonları göster'})
+    + symBlock('mikro', 'Mikrotremör noktaları', {shapes:SH.filter(v => v !== 'yok')})
+    + symBlock('gwl', 'Yeraltı su seviyesi (YASS)', {line:true, maxW:8})
+    + symBlock('fault', 'Faylar', {line:true, maxW:10});
+}
+// Görünüm sekmesindeki önizlemeler
+function drawSymPreviews(){
+  const dpr = 2;
+  document.querySelectorAll('canvas.symprev').forEach(c => {
+    const w = c.clientWidth || 260, h = 48;
+    c.width = w * dpr; c.height = h * dpr;
+    const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    const k = c.dataset.k;
+    symSample(g, k, 18, k === 'mikro' ? 8 : k === 'gwl' ? 2 : k === 'fault' ? 9 : 12, w - 36);
+  });
+  document.querySelectorAll('canvas.shpprev').forEach(c => {
+    c.width = 52; c.height = 52;
+    const g = c.getContext('2d'), o = SY(c.dataset.k), v = c.dataset.shape;
+    g.setTransform(2, 0, 0, 2, 0, 0); g.clearRect(0, 0, 26, 26);
+    if (v === 'yok'){ g.strokeStyle = '#94a3b8'; g.lineWidth = 2; g.beginPath(); g.moveTo(6, 6); g.lineTo(20, 20); g.moveTo(20, 6); g.lineTo(6, 20); g.stroke(); return; }
+    if (o.edge || c.dataset.k === 'mikro'){ g.fillStyle = '#e2e8f0'; g.fillRect(0, 0, 26, 26); }
+    drawMark(g, v, 13, 13, 9, o.color, o.edge || c.dataset.k === 'mikro');
+  });
+}
 function panelPoints(){
-  return bhStylePanel() + listBlock('Sondajlar', 'Mesafe kesit başından itibaren metre cinsindendir. Ağız kotu boş bırakılırsa topoğrafyadan alınır. YASS: yeraltı su seviyesi derinliği (isteğe bağlı).',
+  return `<p class="hint">Sondaj kutucuğu ile MASW, ERT, sismik kırılma, mikrotremör, YASS ve fay gösterimlerinin renk ve şekilleri <b>Görünüm</b> sekmesinden değiştirilir.</p>` + listBlock('Sondajlar', 'Mesafe kesit başından itibaren metre cinsindendir. Ağız kotu boş bırakılırsa topoğrafyadan alınır. YASS: yeraltı su seviyesi derinliği (isteğe bağlı).',
       'boreholes', '1.1fr 1fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Derinlik (m)','depth',{type:'number'}],['Ağız kotu','elev',{type:'number',ph:'otomatik'}],['YASS (m)','gwl',{type:'number',ph:'yok'}]], 'Sondaj ekle', 'bh')
     + listBlock('MASW hatları', 'Hattın orta noktasının mesafesi, hat uzunluğu ve Vs(30) hızı.',
       'masw', '1.6fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Uzunluk (m)','len',{type:'number'}],['Vs(30)','vs',{type:'number'}]], 'MASW hattı ekle', 'masw')
@@ -2516,7 +2623,6 @@ function panelSettings(){
       ${fld('Düşey abartma (x)', 'settings.vex', S.vex, {type:'number', ph:'otomatik'})}
       ${fld('Kesit yüksekliği / genişlik', 'settings.heightRatio', S.heightRatio, {type:'number', step:'0.05'})}
       <label>Uzaklık birimi${sel('settings.unit', [['auto','Otomatik'],['m','metre'],['km','kilometre']], S.unit)}</label>
-      <label>Zemin profili çizgisi${sel('settings.groundStyle', Object.entries(GROUND_STYLES).map(([k, v]) => [k, v.label]), S.groundStyle)}</label>
     </div>
     <h3>Görünüm</h3>
     ${chk('Sondaj ağız kotunu göster', 'settings.showBhElev', S.showBhElev)}
@@ -2588,12 +2694,13 @@ panel.addEventListener('input', e => {
   // Birim değişince kesite özel renk sıfırlanır (yeni birim kendi rengiyle gelir)
   if (el.dataset.path === 'bg') state.bgColor = null;
   const mF = el.dataset.path.match(/^bodies\.(\d+)\.fid$/); if (mF) state.bodies[+mF[1]].color = null;
-  if (el.type === 'range'){ const sv = el.parentElement.querySelector('.sv'); if (sv) sv.textContent = (+el.value).toFixed(2) + 'x'; }
+  if (el.type === 'range'){ const sv = el.parentElement.querySelector('.sv'); if (sv) sv.textContent = el.dataset.u != null ? (+el.value) + el.dataset.u : (+el.value).toFixed(2) + 'x'; }
   if (el.dataset.path.startsWith('formations.')){
     const f = state.formations[+el.dataset.path.split('.')[1]];
     const img = el.closest('.fed')?.previousElementSibling?.querySelector('img'); if (img) img.src = swatchURL(f);
   }
   save(); scheduleDraw();
+  if (ui.tab === 'gorunum'){ drawSymPreviews(); drawBhPreviews(); }
 });
 panel.addEventListener('change', e => {
   const el = e.target;
@@ -2660,6 +2767,9 @@ document.addEventListener('click', e => {
     case 'legLayout': state.legend.layout = t.dataset.v; break;
     case 'legSym': state.legend.symPos = t.dataset.v; break;
     case 'bhStyle': state.settings.bhStyle = t.dataset.v; break;
+    case 'symSet': setPath(`sym.${t.dataset.k}.${t.dataset.f}`, t.dataset.v); break;
+    case 'symReset': if (state.sym) delete state.sym[t.dataset.k]; break;
+    case 'groundPreset': state.settings.groundStyle = t.dataset.v; if (state.sym) delete state.sym.ground; break;
     case 'legAge': state.legend.order = []; toast('Formasyonlar gençten yaşlıya sıralandı'); break;
     case 'legMv': {
       const L = legendForms().map(f => f._key), j = i + +t.dataset.d; if (j < 0 || j >= L.length) return;
