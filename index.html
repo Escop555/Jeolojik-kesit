@@ -1405,9 +1405,7 @@ function draw(canvas, s, edit = false){
   ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.font = FT(40, 'title'); ctx.fillText(P.title || 'JEOLOJİK KESİT', cxT, 30 + 40 * tt);
   if (subtitle){ ctx.font = FT(38, 'title'); ctx.fillText(subtitle, cxT, 30 + 92 * tt); }
-  ctx.font = FT(30, 'title');
-  if (P.dirLeft){ ctx.textAlign = 'left'; ctx.fillText(P.dirLeft, ml - 10, mt - 50 - 20 * tt); }
-  if (P.dirRight){ ctx.textAlign = 'right'; ctx.fillText(P.dirRight, ml + plotW + 10, mt - 50 - 20 * tt); }
+  // Yön yazıları (sol / sağ) gösterim yazıları yerleştikten sonra çizilir (aşağıda)
 
   /* ---- Eksenler ---- */
   const fmtE = v => (Math.abs(v - Math.round(v)) < 1e-6 ? Math.round(v) : (+v.toFixed(2)).toString()) + (S.elevSuffix ? ' m' : '');
@@ -1797,6 +1795,21 @@ function draw(canvas, s, edit = false){
       ctx.fillStyle = '#1565c0'; ctx.beginPath(); ctx.moveTo(gx - 9, gy - 14); ctx.lineTo(gx + 9, gy - 14); ctx.lineTo(gx, gy - 1); ctx.closePath(); ctx.fill();
       ctx.font = FT(15, 'bh'); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; halo(ctx, b.gwl + ' m', gx + 13, gy - 8, 3 + tb);
     }
+  }
+
+  /* ---- Yön yazıları ----
+     Gösterim yazılarıyla (sondaj, MASW, ERT, mikro…) çakışırsa sol ve sağ yön yazısı birlikte, boş yere kadar yukarı çıkar. */
+  {
+    const fd = FT(30, 'title'), fsD = fsOf(fd);
+    ctx.font = fd;
+    const wl = P.dirLeft ? ctx.measureText(P.dirLeft).width : 0, wr = P.dirRight ? ctx.measureText(P.dirRight).width : 0;
+    const boxes = y => [P.dirLeft ? [ml - 14, y - fsD * 0.82 - 4, ml - 6 + wl, y + 4] : null, P.dirRight ? [ml + plotW + 6 - wr, y - fsD * 0.82 - 4, ml + plotW + 14, y + 4] : null].filter(Boolean);
+    let yd = mt - 50 - 20 * tt;
+    const yMin = fsD + 6;
+    while (yd > yMin && boxes(yd).some(hitL)) yd -= 6;
+    ctx.fillStyle = '#000'; ctx.textBaseline = 'alphabetic';
+    if (P.dirLeft){ ctx.textAlign = 'left'; ctx.fillText(P.dirLeft, ml - 10, yd); }
+    if (P.dirRight){ ctx.textAlign = 'right'; ctx.fillText(P.dirRight, ml + plotW + 10, yd); }
   }
 
   /* ---- Düzenleme tutamaçları (yalnızca önizleme) ---- */
