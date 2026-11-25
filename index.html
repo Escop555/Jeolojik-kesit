@@ -563,10 +563,10 @@ function blankState(formations){
     customPatterns:{},
     axis:{left:{start:1000, step:10, end:900}, right:{same:true, start:1000, step:10, end:900}, round:true},
     topo:{length:1000, smooth:true, pts:[[0, 965], [1000, 965]]},
-    text:{title:1, axis:1, axisY:1, axisX:1, code:1, bh:1, masw:1, mikro:1, fault:1},
+    text:{title:1, axis:1, axisY:1, axisX:1, code:1, bh:1, masw:1, ert:1, mikro:1, fault:1},
     legend:{pos:'alt', scale:1, width:680, title:false, border:true, titleAlign:'sol', layout:'sutun', symPos:'sag', order:[],
-            items:{ground:true, contact:true, bh:true, masw:true, mikro:true, gwl:true, fault:true}},
-    bg:'f-jks', bgScale:1, bodies:[], boreholes:[], masw:[], mikro:[], faults:[]
+            items:{ground:true, contact:true, bh:true, masw:true, ert:true, mikro:true, gwl:true, fault:true}},
+    bg:'f-jks', bgScale:1, bodies:[], boreholes:[], masw:[], ert:[], mikro:[], faults:[]
   };
 }
 function sampleState(){
@@ -604,7 +604,7 @@ function normalize(st){
   // kütüphaneye yeni varsayılanları ekle
   const have = new Set((out.formations || []).map(f => f.id));
   out.formations = [...(out.formations || []), ...defaultFormations().filter(f => !have.has(f.id))];
-  ['bodies','boreholes','masw','mikro','faults'].forEach(k => out[k] = out[k] || []);
+  ['bodies','boreholes','masw','ert','mikro','faults'].forEach(k => out[k] = out[k] || []);
   // eski sürüm: metin topoğrafyasını noktalara çevir
   if (st.topoText && !st.topo){
     const p = parsePts(st.topoText, st.topoUnit === 'km' ? 1000 : 1);
@@ -1108,6 +1108,12 @@ function halo(ctx, txt, x, y, w = 4){
   ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineWidth = w; ctx.lineJoin = 'round';
   ctx.strokeText(txt, x, y); ctx.restore(); ctx.fillText(txt, x, y);
 }
+const ERT_C = '#ef6c00';
+function ertMark(ctx, px, py){   // ERT hattı merkezi: beyaz kenarlı eşkenar dörtgen
+  ctx.save(); ctx.fillStyle = ERT_C; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(px, py - 12); ctx.lineTo(px + 12, py); ctx.lineTo(px, py + 12); ctx.lineTo(px - 12, py); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
 const GROUND_STYLES = {
   red:{color:'#c0392b', dash:[14,8], w:3, label:'Kırmızı kesikli'},
   darkred:{color:'#8e2a1f', dash:[16,6,3,6], w:3, label:'Koyu kırmızı noktalı-kesikli'},
@@ -1274,6 +1280,7 @@ function draw(canvas, s, edit = false){
   if (anyContact && LI.contact !== false) sym.push('contact');
   if (m.bhs.length && LI.bh !== false) sym.push('bh');
   if (state.masw.some(x => num(x.ch) !== null) && LI.masw !== false) sym.push('masw');
+  if ((state.ert || []).some(x => num(x.ch) !== null) && LI.ert !== false) sym.push('ert');
   if (state.mikro.some(x => num(x.ch) !== null) && LI.mikro !== false) sym.push('mikro');
   if (m.bhs.some(b => b.gwl !== null) && LI.gwl !== false) sym.push('gwl');
   if (state.faults.some(x => num(x.ch) !== null) && LI.fault !== false) sym.push('fault');
@@ -1314,6 +1321,7 @@ function draw(canvas, s, edit = false){
     contact:[[['Tahmini Jeolojik Sınır', 'bold 20px Arial'], [S.contactNote, 'italic 17px Arial']], 30, 0],
     bh:[[['Sondaj Noktası', 'bold 20px Arial'], ['(Düşey ölçek abartılıdır)', 'bold 18px Arial'], ['(Vertical scale is exaggerated)', 'italic 17px Arial']], 96, 8],
     masw:[[['MASW-KIRILMA', 'bold 20px Arial'], ['MASW + Sismik Kırılma', 'italic 17px Arial'], ['Çalışma Hattı', 'italic 17px Arial']], 30, 0],
+    ert:[[['ERT', 'bold 20px Arial'], ['Elektrik Özdirenç Tomografisi', 'italic 17px Arial'], ['Çalışma Hattı', 'italic 17px Arial']], 30, 0],
     mikro:[[['MİKRO', 'bold 20px Arial'], ['Mikrotremör (HVSR)', 'italic 17px Arial'], ['Çalışma Noktası', 'italic 17px Arial']], 34, 0],
     gwl:[[['Yeraltı Su Seviyesi (YASS)', '20px Arial']], 24, 4],
     fault:[[['Fay', '20px Arial']], 34, 2],
@@ -1619,6 +1627,38 @@ function draw(canvas, s, edit = false){
     halo(ctx, a.name || 'MASW KIRILMA', 0, -18 - 2 * tm, 3 + tm);
     ctx.restore();
   }
+  // ERT hatları (Elektrik Özdirenç Tomografisi)
+  for (const a of (state.ert || [])){
+    const ch = num(a.ch); if (ch === null) continue;
+    const L = Math.max(0, num(a.len) ?? 200);
+    const x0 = Math.max(m.xmin, ch - L / 2), x1 = Math.min(m.xmax, ch + L / 2);
+    if (!(x1 > x0)) continue;
+    // Aynı yerde MASW hattı varsa ERT, MASW çizgisinin hemen altında (zemin içinde) çizilir; yazıları MASW yazılarının üstüne çıkar
+    const ov = state.masw.some(w => { const c = num(w.ch); if (c === null) return false; const l = Math.max(0, num(w.len) ?? 100); return c - l / 2 < x1 && c + l / 2 > x0; });
+    const off = ov ? -9 : 2, gy = x => Y(ground(x)) - off;
+    const xs = [x0, ...m.gxs.filter(x => x > x0 && x < x1), x1];
+    ctx.strokeStyle = ERT_C; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); xs.forEach((x, i) => i ? ctx.lineTo(X(x), gy(x)) : ctx.moveTo(X(x), gy(x))); ctx.stroke();
+    ctx.lineCap = 'butt';
+    // Elektrotlar: girilen aralıkla (çok sıksa okunur bir sıklıkta)
+    const sp = num(a.sp), pxL = X(x1) - X(x0);
+    let n = sp && sp > 0 ? Math.round((x1 - x0) / sp) : 0;
+    if (!n || pxL / n < 9) n = Math.max(2, Math.floor(pxL / 14));
+    ctx.lineWidth = 2.5;
+    for (let k = 0; k <= n; k++){ const x = x0 + (x1 - x0) * k / n, px = X(x), py = gy(x); ctx.beginPath(); ctx.moveTo(px, py - 7); ctx.lineTo(px, py + 7); ctx.stroke(); }
+    const cx = Math.min(Math.max(ch, x0), x1), px = X(cx), py = gy(cx);
+    ertMark(ctx, px, py);
+    // Yazının üstüne mikrotremör simgesi geliyorsa yazı yukarı alınır
+    const nearMikro = state.mikro.some(k => { const c = num(k.ch); return c !== null && Math.abs(X(c) - px) < 90; });
+    const ang = Math.atan2(gy(x1) - gy(x0), X(x1) - X(x0));
+    ctx.save(); ctx.translate(px, py); ctx.rotate(ang);
+    ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    const te = TS('ert'); ctx.font = FT(17, 'ert');
+    const ly = (ov ? -9 : 0) - 18 - 2 * te - (ov ? 46 * TS('masw') : 0) - (nearMikro ? 48 : 0);
+    if (sp) halo(ctx, 'Elektrot aralığı: ' + a.sp + ' m', 0, ly - 22 * te, 3 + te);
+    halo(ctx, a.name || 'ERT', 0, ly, 3 + te);
+    ctx.restore();
+  }
   // Mikrotremör noktaları
   for (const k of state.mikro){
     const ch = num(k.ch); if (ch === null) continue;
@@ -1714,6 +1754,10 @@ function draw(canvas, s, edit = false){
         ctx.strokeStyle = '#6a2c91'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
         ctx.fillStyle = '#6a2c91'; ctx.beginPath(); ctx.arc(ix + 50, y + 12, 11, 0, Math.PI * 2); ctx.fill();
         T('MASW-KIRILMA', 0, 'bold 20px Arial'); T('MASW + Sismik Kırılma', 28, 'italic 17px Arial'); T('Çalışma Hattı', 52, 'italic 17px Arial');
+      } else if (it.kind === 'ert'){
+        ctx.strokeStyle = ERT_C; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
+        ctx.lineWidth = 2.5; for (let k = 0; k <= 7; k++){ const px = ix + k * 100 / 7; ctx.beginPath(); ctx.moveTo(px, y + 5); ctx.lineTo(px, y + 19); ctx.stroke(); }
+        ertMark(ctx, ix + 50, y + 12);
       } else if (it.kind === 'mikro'){
         const px = ix + 50, py = y + 16;
         ctx.fillStyle = '#fff'; ctx.strokeStyle = '#2e9e44'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -2214,6 +2258,8 @@ function panelPoints(){
       'boreholes', '1.1fr 1fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Derinlik (m)','depth',{type:'number'}],['Ağız kotu','elev',{type:'number',ph:'otomatik'}],['YASS (m)','gwl',{type:'number',ph:'yok'}]], 'Sondaj ekle', 'bh')
     + listBlock('MASW – Kırılma hatları', 'Hattın orta noktasının mesafesi, hat uzunluğu ve Vs(30) hızı.',
       'masw', '1.6fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Uzunluk (m)','len',{type:'number'}],['Vs(30)','vs',{type:'number'}]], 'MASW hattı ekle', 'masw')
+    + listBlock('ERT hatları', 'Elektrik Özdirenç Tomografisi: hattın orta noktasının mesafesi, hat uzunluğu ve (isteğe bağlı) elektrot aralığı.',
+      'ert', '1.6fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Uzunluk (m)','len',{type:'number'}],['Elektrot ar. (m)','sp',{type:'number',ph:'isteğe bağlı'}]], 'ERT hattı ekle', 'ert')
     + listBlock('Mikrotremör noktaları', 'Noktanın kesit üzerindeki mesafesi.',
       'mikro', '1.6fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}]], 'Mikrotremör ekle', 'mikro')
     + listBlock('Faylar', 'Fayın yüzeydeki ve kesit tabanındaki mesafesi.',
@@ -2313,6 +2359,7 @@ function panelLegend(){
     ${chk('Tahmini Jeolojik Sınır', 'legend.items.contact', I.contact !== false)}
     ${chk('Sondaj Noktası', 'legend.items.bh', I.bh !== false)}
     ${chk('MASW-Kırılma', 'legend.items.masw', I.masw !== false)}
+    ${chk('ERT (Elektrik Özdirenç Tomografisi)', 'legend.items.ert', I.ert !== false)}
     ${chk('Mikrotremör', 'legend.items.mikro', I.mikro !== false)}
     ${chk('Yeraltı Su Seviyesi', 'legend.items.gwl', I.gwl !== false)}
     ${chk('Fay', 'legend.items.fault', I.fault !== false)}
@@ -2451,6 +2498,7 @@ function fitTopoToAxis(){
 const NEW_ITEM = {
   boreholes: () => ({id:uid(), name:'SK-' + (state.boreholes.length + 1), ch:null, depth:20, elev:null, gwl:null}),
   masw: () => ({id:uid(), name:'MASW KIRILMA-', ch:null, len:120, vs:null}),
+  ert: () => ({id:uid(), name:'ERT-' + ((state.ert || []).length + 1), ch:null, len:200, sp:null}),
   mikro: () => ({id:uid(), name:'MİKRO-', ch:null}),
   faults: () => ({id:uid(), label:'F' + (state.faults.length + 1), ch:null, chb:null}),
 };
