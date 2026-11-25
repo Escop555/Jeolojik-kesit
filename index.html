@@ -586,9 +586,9 @@ function sampleState(){
     {id:uid(), name:'SK-37', ch:2940, depth:15, elev:null, gwl:null},
   ];
   st.masw = [
-    {id:uid(), name:'MASW KIRILMA-28', ch:250, len:120, vs:871}, {id:uid(), name:'MASW KIRILMA-29', ch:840, len:120, vs:616},
-    {id:uid(), name:'MASW KIRILMA-31', ch:1340, len:120, vs:777}, {id:uid(), name:'MASW KIRILMA-32', ch:2020, len:120, vs:836},
-    {id:uid(), name:'MASW KIRILMA-34', ch:2600, len:120, vs:765}];
+    {id:uid(), name:'MASW-28', ch:250, len:120, vs:871}, {id:uid(), name:'MASW-29', ch:840, len:120, vs:616},
+    {id:uid(), name:'MASW-31', ch:1340, len:120, vs:777}, {id:uid(), name:'MASW-32', ch:2020, len:120, vs:836},
+    {id:uid(), name:'MASW-34', ch:2600, len:120, vs:765}];
   st.mikro = [{id:uid(), name:'MİKRO-28', ch:400}, {id:uid(), name:'MİKRO-29', ch:560}, {id:uid(), name:'MİKRO-31', ch:1680},
               {id:uid(), name:'MİKRO-32', ch:2350}, {id:uid(), name:'MİKRO-34', ch:2800}];
   return st;
@@ -1339,7 +1339,7 @@ function draw(canvas, s, edit = false){
     ground:[[['Mevcut Zemin Profili', '20px Arial']], 30, 0],
     contact:[[['Tahmini Jeolojik Sınır', 'bold 20px Arial'], [S.contactNote, 'italic 17px Arial']], 30, 0],
     bh:[[['Sondaj Noktası', 'bold 20px Arial'], ['(Düşey ölçek abartılıdır)', 'bold 18px Arial'], ['(Vertical scale is exaggerated)', 'italic 17px Arial']], 96, 8],
-    masw:[[['MASW-KIRILMA', 'bold 20px Arial'], ['MASW + Sismik Kırılma', 'italic 17px Arial'], ['Çalışma Hattı', 'italic 17px Arial']], 30, 0],
+    masw:[[['MASW', 'bold 20px Arial'], ['Çok Kanallı Yüzey Dalgası Analizi', 'italic 17px Arial'], ['Çalışma Hattı', 'italic 17px Arial']], 30, 0],
     kirilma:[[['SİSMİK KIRILMA', 'bold 20px Arial'], ['Sismik Kırılma (P dalgası)', 'italic 17px Arial'], ['Çalışma Hattı', 'italic 17px Arial']], 30, 0],
     ert:[[['ERT', 'bold 20px Arial'], ['Elektrik Özdirenç Tomografisi', 'italic 17px Arial'], ['Çalışma Hattı', 'italic 17px Arial']], 30, 0],
     mikro:[[['MİKRO', 'bold 20px Arial'], ['Mikrotremör (HVSR)', 'italic 17px Arial'], ['Çalışma Noktası', 'italic 17px Arial']], 34, 0],
@@ -1709,7 +1709,7 @@ function draw(canvas, s, edit = false){
     const ang = Math.atan2(Y(ground(x1)) - Y(ground(x0)), X(x1) - X(x0));
     const tm = TS('masw'), fm = FT(17, 'masw'), its = [];
     if (num(a.vs) !== null) its.push(['Vs(30) Hızı: ' + a.vs, fm, -18 - 24 * tm, 3 + tm]);
-    its.push([a.name || 'MASW KIRILMA', fm, -18 - 2 * tm, 3 + tm]);
+    its.push([a.name || 'MASW', fm, -18 - 2 * tm, 3 + tm]);
     placeRot(px, py, ang, its, '#6a2c91', 14);
   }
   // ERT hatları (Elektrik Özdirenç Tomografisi)
@@ -1864,7 +1864,7 @@ function draw(canvas, s, edit = false){
       } else if (it.kind === 'masw'){
         ctx.strokeStyle = '#6a2c91'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
         ctx.fillStyle = '#6a2c91'; ctx.beginPath(); ctx.arc(ix + 50, y + 12, 11, 0, Math.PI * 2); ctx.fill();
-        T('MASW-KIRILMA', 0, 'bold 20px Arial'); T('MASW + Sismik Kırılma', 28, 'italic 17px Arial'); T('Çalışma Hattı', 52, 'italic 17px Arial');
+        T('MASW', 0, 'bold 20px Arial'); T('Çok Kanallı Yüzey Dalgası Analizi', 28, 'italic 17px Arial'); T('Çalışma Hattı', 52, 'italic 17px Arial');
       } else if (it.kind === 'ert'){
         ctx.strokeStyle = ERT_C; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(ix, y + 12); ctx.lineTo(ix + 100, y + 12); ctx.stroke();
         ctx.lineWidth = 2.5; for (let k = 0; k <= 7; k++){ const px = ix + k * 100 / 7; ctx.beginPath(); ctx.moveTo(px, y + 5); ctx.lineTo(px, y + 19); ctx.stroke(); }
@@ -2371,7 +2371,7 @@ function drawBhPreviews(){
 function panelPoints(){
   return bhStylePanel() + listBlock('Sondajlar', 'Mesafe kesit başından itibaren metre cinsindendir. Ağız kotu boş bırakılırsa topoğrafyadan alınır. YASS: yeraltı su seviyesi derinliği (isteğe bağlı).',
       'boreholes', '1.1fr 1fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Derinlik (m)','depth',{type:'number'}],['Ağız kotu','elev',{type:'number',ph:'otomatik'}],['YASS (m)','gwl',{type:'number',ph:'yok'}]], 'Sondaj ekle', 'bh')
-    + listBlock('MASW – Kırılma hatları', 'Hattın orta noktasının mesafesi, hat uzunluğu ve Vs(30) hızı.',
+    + listBlock('MASW hatları', 'Hattın orta noktasının mesafesi, hat uzunluğu ve Vs(30) hızı.',
       'masw', '1.6fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Uzunluk (m)','len',{type:'number'}],['Vs(30)','vs',{type:'number'}]], 'MASW hattı ekle', 'masw')
     + listBlock('ERT hatları', 'Elektrik Özdirenç Tomografisi: hattın orta noktasının mesafesi, hat uzunluğu ve (isteğe bağlı) elektrot aralığı.',
       'ert', '1.6fr 1fr 1fr 1fr', [['Ad','name'],['Mesafe (m)','ch',{type:'number'}],['Uzunluk (m)','len',{type:'number'}],['Elektrot ar. (m)','sp',{type:'number',ph:'isteğe bağlı'}]], 'ERT hattı ekle', 'ert')
@@ -2475,7 +2475,7 @@ function panelLegend(){
     ${chk('Mevcut Zemin Profili', 'legend.items.ground', I.ground !== false)}
     ${chk('Tahmini Jeolojik Sınır', 'legend.items.contact', I.contact !== false)}
     ${chk('Sondaj Noktası', 'legend.items.bh', I.bh !== false)}
-    ${chk('MASW-Kırılma', 'legend.items.masw', I.masw !== false)}
+    ${chk('MASW', 'legend.items.masw', I.masw !== false)}
     ${chk('ERT (Elektrik Özdirenç Tomografisi)', 'legend.items.ert', I.ert !== false)}
     ${chk('Sismik Kırılma', 'legend.items.kirilma', I.kirilma !== false)}
     ${chk('Mikrotremör', 'legend.items.mikro', I.mikro !== false)}
@@ -2615,7 +2615,7 @@ function fitTopoToAxis(){
 
 const NEW_ITEM = {
   boreholes: () => ({id:uid(), name:'SK-' + (state.boreholes.length + 1), ch:null, depth:20, elev:null, gwl:null}),
-  masw: () => ({id:uid(), name:'MASW KIRILMA-', ch:null, len:120, vs:null}),
+  masw: () => ({id:uid(), name:'MASW-', ch:null, len:120, vs:null}),
   ert: () => ({id:uid(), name:'ERT-' + ((state.ert || []).length + 1), ch:null, len:200, sp:null}),
   kirilma: () => ({id:uid(), name:'KIRILMA-' + ((state.kirilma || []).length + 1), ch:null, len:200, vp:null, sp:null}),
   mikro: () => ({id:uid(), name:'MİKRO-', ch:null}),
