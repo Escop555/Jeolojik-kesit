@@ -1135,7 +1135,7 @@ function placeCodes(ctx, m, X, Y, ml, mt, plotW, plotH, fs0){
   // Sondaj kolonları ve mikrotremör simgeleri: yazı bunların üzerine gelmesin
   const obst = [];
   m.bhs.forEach(b => obst.push([X(b.ch) - 16, Y(b.elev) - 20, X(b.ch) + 16, Y(b.elev - b.depth) + 8]));
-  state.mikro.forEach(k => { const ch = num(k.ch); if (ch !== null) obst.push([X(ch) - 22, Y(m.ground(ch)) - 50, X(ch) + 22, Y(m.ground(ch))]); });
+  state.mikro.forEach(k => { const ch = num(k.ch); if (ch !== null) obst.push([X(ch) - 22, Y(m.ground(ch)) - 40, X(ch) + 22, Y(m.ground(ch)) + 18]); });
   const blocked = new Uint8Array(N);
   for (const [x0, y0, x1, y1] of obst)
     for (let j = Math.max(0, Math.floor((y0 - mt) / cs)); j <= Math.min(ny - 1, Math.floor((y1 - mt) / cs)); j++)
@@ -1630,7 +1630,7 @@ function draw(canvas, s, edit = false){
   }
   for (const k of state.mikro){
     const ch = num(k.ch); if (ch === null) continue;
-    const px = X(ch), py = Y(ground(ch)) - 30;
+    const px = X(ch), py = Y(ground(ch));   // simge tam zemin çizgisinde
     LBL.push([px - 17, py - 17, px + 17, py + 17], tBox(k.name || 'MİKRO', FT(16, 'mikro'), px, py - 20));
   }
   // Eğime göre döndürülmüş yazı grubu. items: [metin, yazı tipi, yerel y, hale kalınlığı]; r0: simgenin yarıçapı
@@ -1751,7 +1751,7 @@ function draw(canvas, s, edit = false){
   // Mikrotremör noktaları
   for (const k of state.mikro){
     const ch = num(k.ch); if (ch === null) continue;
-    const px = X(ch), py = Y(ground(ch)) - 30;
+    const px = X(ch), py = Y(ground(ch));   // simge tam zemin çizgisinde
     ctx.fillStyle = '#fff'; ctx.strokeStyle = '#2e9e44'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#2e9e44'; ctx.beginPath(); ctx.moveTo(px, py - 9); ctx.lineTo(px + 8.5, py + 6); ctx.lineTo(px - 8.5, py + 6); ctx.closePath(); ctx.fill();
