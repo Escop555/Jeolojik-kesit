@@ -1632,11 +1632,12 @@ function draw(canvas, s, edit = false){
   // Sondajlar
   for (const b of m.bhs){
     if (b.ch < m.xmin || b.ch > m.xmax) continue;
-    const x = X(b.ch), yTop = Y(b.elev) - 12, yBot = Math.min(Y(b.elev - b.depth), mt + plotH);
+    const x = X(b.ch), yTop = Y(b.elev),   // kutucuk tam ağız kotundan başlar
+           yBot = Math.min(Y(b.elev - b.depth), mt + plotH);
     bhBox(ctx, x, yTop, yBot, {pxPerM:vpx, x:b.ch, y0:Y(b.elev)});
     ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
     const tb = TS('bh');
-    let ly = yTop - 8;
+    let ly = yTop - 20;   // yazılar kutucuğun hemen üstünde
     if (S.showBhElev){ ctx.font = FT(15, 'bh'); halo(ctx, Math.round(b.elev) + ' m', x, ly, 3 + tb); ly -= 22 * tb; }
     ctx.font = FT(22, 'bh'); halo(ctx, b.name || 'SK', x, ly, 3 + tb);
     if (b.gwl !== null){
@@ -3966,10 +3967,10 @@ function rebuild3D(){
   for (const b of m.bhs){
     if (b.ch < m.xmin || b.ch > m.xmax) continue;
     const h = Math.max(0.05, b.depth / rng * Hw), yTop = WY(b.elev), rr = Math.max(0.035, Lw * 0.004);
-    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, h + 0.12, 16), bhMat);
-    cyl.position.set(WX(b.ch), yTop - h / 2 + 0.06, zf); V3.group.add(cyl);
+    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, h, 16), bhMat);
+    cyl.position.set(WX(b.ch), yTop - h / 2, zf); V3.group.add(cyl);
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(rr * 1.6, rr * 1.6, 0.04, 16), capMat);
-    cap.position.set(WX(b.ch), yTop + 0.12, zf); V3.group.add(cap);
+    cap.position.set(WX(b.ch), yTop + 0.02, zf); V3.group.add(cap);
     const lbl = textSprite(b.name || 'SK'); lbl.position.set(WX(b.ch), yTop + 0.45, zf); V3.group.add(lbl);
   }
   // Yön etiketleri
